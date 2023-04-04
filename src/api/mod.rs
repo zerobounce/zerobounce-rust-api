@@ -61,9 +61,15 @@ impl ZeroBounce {
             .query(&query_args)
             .send()?;
 
+        let response_ok = response.status().is_success();
+
         let response_content = response
             .text()?;
-        println!("response content ({}): {}", response_content.len(), response_content);
+
+        if !response_ok {
+            return Err(ZBError::explicit(response_content.as_str()));
+        }
+
         Self::get_credits_from_string(response_content)
     }
 
