@@ -62,7 +62,6 @@ impl ZeroBounce {
             .send()?;
 
         let response_ok = response.status().is_success();
-
         let response_content = response
             .text()?;
 
@@ -88,7 +87,13 @@ impl ZeroBounce {
             .query(&query_args)
             .send()?;
 
+        let response_ok = response.status().is_success();
         let response_content = response.text()?;
+
+        if !response_ok {
+            return Err(ZBError::explicit(response_content.as_str()));
+        }
+
         let api_usage = from_str::<ApiUsage>(&response_content)?;
         Ok(api_usage)
     }
@@ -101,13 +106,23 @@ impl ZeroBounce {
 
 #[cfg(test)]
 mod tests {
-    use crate::utility::mock_constants::CREDITS_RESPONSE;
+    use crate::utility::mock_constants::CREDITS_RESPONSE_OK;
+    use crate::utility::mock_constants::CREDITS_RESPONSE_NEGATIVE;
 
     use super::*;
 
     #[test]
-    fn test_credits_from_ok_response() {
-        let credits = ZeroBounce::get_credits_from_string(CREDITS_RESPONSE.to_string());
+    fn test_credits_negative() {
+        let credits = ZeroBounce::get_credits_from_string(CREDITS_RESPONSE_NEGATIVE.to_string());
+        assert!(credits.is_ok());
+        
+        let amount = credits.unwrap();
+        assert_eq!(amount, -1);
+    }
+
+    #[test]
+    fn test_credits_ok() {
+        let credits = ZeroBounce::get_credits_from_string(CREDITS_RESPONSE_OK.to_string());
         assert!(credits.is_ok());
         
         let amount = credits.unwrap();

@@ -37,8 +37,20 @@ pub const API_USAGE_RESPONSE: &str = r#"
 }
 "#;
 
-pub const CREDITS_RESPONSE: &str = r#"
+pub const CREDITS_RESPONSE_OK: &str = r#"
 {
     "Credits": "123456"
+}
+"#;
+
+pub const CREDITS_RESPONSE_NEGATIVE: &str = r#"
+{
+    "Credits": "-1"
+}
+"#;
+
+pub const INVALID_API_RESPONSE: &str = r#"
+{
+    "error": "Missing parameter: api_key."
 }
 "#;
