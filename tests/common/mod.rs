@@ -1,5 +1,5 @@
 use mockito::{Matcher, ServerGuard, Server};
-use zero_bounce::api::{ZBUrlProvider, ZeroBounce};
+use zero_bounce::{ZBUrlProvider, ZeroBounce};
 
 pub(crate) const MOCK_API_KEY: &str = "mock_api_key";
 pub(crate) const INVALID_URL: &str = "http://255.255.255.255";

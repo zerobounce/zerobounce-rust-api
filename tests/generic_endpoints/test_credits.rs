@@ -1,4 +1,4 @@
-use zero_bounce::api::{ZeroBounce, ZBUrlProvider};
+use zero_bounce::{ZBUrlProvider, ZeroBounce};
 use zero_bounce::utility::{ENDPOINT_CREDITS, ZBError, mock_constants};
 
 use crate::common::{INVALID_URL, MOCK_API_KEY};
