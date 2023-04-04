@@ -54,3 +54,17 @@ pub const INVALID_API_RESPONSE: &str = r#"
     "error": "Missing parameter: api_key."
 }
 "#;
+
+pub const ACTIVITY_DATA_RESPONSE_ACTIVE: &str = r#"
+{
+    "found": true,
+    "active_in_days": "180"
+}
+"#;
+
+pub const ACTIVITY_DATA_RESPONSE_INACTIVE: &str = r#"
+{
+    "found": false,
+    "active_in_days": null
+}
+"#;
