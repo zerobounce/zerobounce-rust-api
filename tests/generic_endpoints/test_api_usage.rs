@@ -21,9 +21,9 @@ fn test_api_usage_client_error() {
     let api_usage = zb_instance.get_api_usage_overall();
     assert!(api_usage.is_err());
 
-    let api_usage_error = api_usage.unwrap_err();
-    let ZBError::RequestError(_) = api_usage_error else {
-        panic!("unexpected error: {:#?}", api_usage_error);
+    let zb_error = api_usage.unwrap_err();
+    let ZBError::RequestError(_) = zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
     };
 }
 
@@ -40,9 +40,9 @@ fn test_api_usage_invalid_json() {
     assert!(api_usage.is_err());
     mock.assert();
 
-    let api_usage_error = api_usage.unwrap_err();
-    let ZBError::JsonError(_) = api_usage_error else {
-        panic!("unexpected error: {:#?}", api_usage_error);
+    let zb_error = api_usage.unwrap_err();
+    let ZBError::JsonError(_) = zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
     };
 }
 
@@ -60,9 +60,9 @@ fn test_api_usage_bad_request() {
     assert!(api_usage.is_err());
     mock.assert();
 
-    let api_usage_error = api_usage.unwrap_err();
-    let ZBError::ExplicitError(_) = api_usage_error else {
-        panic!("unexpected error: {:#?}", api_usage_error);
+    let zb_error = api_usage.unwrap_err();
+    let ZBError::ExplicitError(_) = zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
     };
 }
 
