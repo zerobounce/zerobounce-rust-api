@@ -55,16 +55,16 @@ pub struct ApiUsage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utility::mock_constants::API_USAGE_DATA;
+    use crate::utility::mock_constants::API_USAGE_RESPONSE;
 
     #[test]
     fn json_parsing_test() {
-        let api_usage: serde_json::Result<ApiUsage> = serde_json::from_str(API_USAGE_DATA);
+        let api_usage: serde_json::Result<ApiUsage> = serde_json::from_str(API_USAGE_RESPONSE);
         assert!(api_usage.is_ok());
 
         let api_usage_obj = api_usage.unwrap();
-        let expected_start_date = NaiveDate::from_ymd_opt(2018, 11, 1).unwrap();
-        let expected_end_date = NaiveDate::from_ymd_opt(2023, 12, 12).unwrap();
+        let expected_start_date = NaiveDate::from_ymd_opt(2010, 1, 12).unwrap();
+        let expected_end_date = NaiveDate::from_ymd_opt(2030, 12, 1).unwrap();
         assert_eq!(api_usage_obj.start_date, expected_start_date);
         assert_eq!(api_usage_obj.end_date, expected_end_date);
 	}

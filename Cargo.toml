@@ -7,8 +7,9 @@ edition = "2021"
 
 [dependencies]
 chrono = "0.4.24"
-http = "0.2.9"
-json = "0.12.4"
 reqwest = { version = "0.11.16", features = ["blocking"] }
 serde = { version ="1.0.159", features = ["derive"] }
 serde_json = "1.0.95"
+
+[dev-dependencies]
+mockito = "1.0.2"

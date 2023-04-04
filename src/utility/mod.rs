@@ -1,5 +1,5 @@
 pub mod structures;
-pub(crate) mod mock_constants;
+pub mod mock_constants;
 
 use serde::de::Error as SerdeError;
 
@@ -54,6 +54,7 @@ pub const SS_ROLE_BASED_CATCH_ALL: &str = "role_based_catch_all";
 pub const SS_DISPOSABLE: &str = "disposable";
 pub const SS_TOXIC: &str = "toxic";
 
+#[derive(Debug)]
 pub enum ZBError {
     ExplicitError(String),
     JsonError(serde_json::Error),
