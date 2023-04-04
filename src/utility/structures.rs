@@ -20,13 +20,16 @@ where
     D: serde::Deserializer<'de>,
 {
     let optional_string: Option<&str> = serde::Deserialize::deserialize(deserializer)?;
-    
+
     if optional_string == None {
         return Ok(None);
     }
-    
-    let string = optional_string.unwrap();
-    let value = string.parse::<u128>().map_err(SerdeError::custom)?;
+
+    let value: u128 = optional_string
+        .unwrap()
+        .parse::<u128>()
+        .map_err(SerdeError::custom)?;
+
     Ok(Some(value))
 }
 
