@@ -1,6 +1,5 @@
 pub mod api;
 pub mod utility;
-pub mod validation;
 
 use std::collections::HashMap;
 use crate::utility::{ZBError, ZBResult};

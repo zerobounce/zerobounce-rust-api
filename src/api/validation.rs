@@ -87,10 +87,17 @@ impl ZeroBounce {
             .header("content-type", "application/json")
             .send()?;
 
+        let response_ok = response.status().is_success();
         let response_content = response.text()?;
+
+        if !response_ok {
+            return Err(ZBError::explicit(response_content.as_str()));
+        }
+
         let validation = from_str::<ZBBatchValidation>(response_content.as_str())?;
         Ok(validation)
     }
+
 }
 
 #[cfg(test)]
