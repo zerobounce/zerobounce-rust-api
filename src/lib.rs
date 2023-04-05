@@ -1,5 +1,6 @@
 pub mod api;
 pub mod utility;
+pub mod validation;
 
 
 // Structure meant to generate the URLs to be accessed with the HTTP requests
