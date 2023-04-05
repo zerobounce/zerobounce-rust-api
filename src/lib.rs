@@ -2,6 +2,9 @@ pub mod api;
 pub mod utility;
 pub mod validation;
 
+use std::collections::HashMap;
+use crate::utility::{ZBError, ZBResult};
+
 
 // Structure meant to generate the URLs to be accessed with the HTTP requests
 // based on the base API URLs (for the base API and bulk API).
@@ -25,8 +28,45 @@ impl Default for ZBUrlProvider {
     }
 }
 
+// Client offering methods for different API methods and functionalities
 pub struct ZeroBounce {
     pub api_key: String,
     pub client: reqwest::blocking::Client,
     pub url_provider: ZBUrlProvider,
+}
+
+
+// More method implementations of this class can be found throughout
+// the project.
+impl ZeroBounce {
+
+    pub fn new(api_key: &str) -> ZeroBounce {
+        ZeroBounce {
+            api_key: api_key.to_string().clone(),
+            client: reqwest::blocking::Client::default(),
+            url_provider: ZBUrlProvider::default()
+        }
+    }
+
+    fn generic_get_request(
+        &self, endpoint: &str, query_args: HashMap<&str, String>
+    ) -> ZBResult<String>
+    {
+
+        let url = self.url_provider.url_of(endpoint);
+
+        let response = self.client.get(url)
+            .query(&query_args)
+            .send()?;
+
+        let response_ok = response.status().is_success();
+        let response_content = response.text()?;
+
+        if !response_ok {
+            return Err(ZBError::explicit(response_content.as_str()));
+        }
+
+        Ok(response_content)
+    }
+
 }
