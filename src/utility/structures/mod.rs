@@ -1,3 +1,4 @@
+pub mod bulk;
 pub mod generic;
 pub mod validation;
 
