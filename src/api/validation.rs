@@ -4,10 +4,10 @@ use serde::Serialize;
 use serde_json::from_str;
 use serde_json::{Map as SerdeMap, Value};
 
-
 use crate::{ZeroBounce,  ZBResult};
 use crate::utility::{ENDPOINT_VALIDATE, ZBError, ENDPOINT_BATCH_VALIDATE};
 use crate::utility::structures::validation::{ZBValidation, ZBBatchValidation};
+
 
 impl ZeroBounce {
 
@@ -47,7 +47,6 @@ impl ZeroBounce {
     //     ]
     // }
     // ```
-    //
     // After the value is built, serialize and return the resulted string.
     fn batch_validate_prepare_body(&self, emails_and_ip_addresses: Vec<(String, String)>) -> ZBResult<String> {
         let email_batch = emails_and_ip_addresses
