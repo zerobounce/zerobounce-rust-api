@@ -225,6 +225,14 @@ pub const BULK_VALIDATION_SUBMIT_OK: &str = r#"
 }
 "#;
 
+pub const BULK_VALIDATION_SUBMIT_ERROR: &str = r#"
+{
+    "success": false,
+    "error_message": "Over 50% of the file you uploaded contains emails in a wrong format, this is usually because you are uploading the wrong file, the file is in the wrong format or wrong column for email has been selected.",
+    "message": "Over 50% of the file you uploaded contains emails in a wrong format, this is usually because you are uploading the wrong file, the file is in the wrong format or wrong column for email has been selected."
+}
+"#;
+
 pub const BULK_VALIDATION_STATUS_OK: &str = r#"
 {
     "success": true,

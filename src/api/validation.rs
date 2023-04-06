@@ -22,7 +22,7 @@ impl ZeroBounce {
         }
 
         let response_content = self.generic_get_request(
-            ENDPOINT_VALIDATE, query_args
+            self.url_provider.url_of(ENDPOINT_VALIDATE), query_args
         )?;
 
         let validation = from_str::<ZBValidation>(&response_content)?;
@@ -73,7 +73,7 @@ impl ZeroBounce {
             .map_err(ZBError::JsonError)?;
 
         let final_string = String::from_utf8(serializer.into_inner())
-            .map_err(|error| ZBError::explicit(error.to_string().as_str()))?;
+            .map_err(|error| ZBError::ExplicitError(error.to_string()))?;
 
         Ok(final_string)
     }
@@ -91,7 +91,7 @@ impl ZeroBounce {
         let response_content = response.text()?;
 
         if !response_ok {
-            return Err(ZBError::explicit(response_content.as_str()));
+            return Err(ZBError::ExplicitError(response_content));
         }
 
         let validation = from_str::<ZBBatchValidation>(response_content.as_str())?;

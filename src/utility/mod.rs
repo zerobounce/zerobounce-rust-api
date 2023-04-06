@@ -1,3 +1,5 @@
+use std::io::Error as IOError;
+
 pub mod structures;
 pub mod mock_constants;
 
@@ -57,7 +59,8 @@ pub enum ZBError {
     ExplicitError(String),
     JsonError(serde_json::Error),
     IntParseError(std::num::ParseIntError),
-    RequestError(reqwest::Error)
+    RequestError(reqwest::Error),
+    IOError(IOError),
 }
 
 pub type ZBResult<T> = Result<T, ZBError>;
@@ -86,5 +89,11 @@ impl From<reqwest::Error> for ZBError {
 impl From<serde_json::Error> for ZBError {
     fn from(value: serde_json::Error) -> ZBError {
         ZBError::JsonError(value)
+    }
+}
+
+impl From<IOError> for ZBError {
+    fn from(value: IOError) -> Self {
+        ZBError::IOError(value)
     }
 }

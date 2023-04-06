@@ -1,7 +1,13 @@
+use std::fmt::Debug;
+
+use bytes::Bytes;
 use chrono::{DateTime, FixedOffset};
+use reqwest::blocking::multipart::{Form, Part};
+
 use serde::{Deserialize, de::Error as SerdeError};
 use serde_json::Value;
 
+use crate::utility::{ZBResult, ZBError};
 use crate::utility::structures::custom_deserialize::deserialize_date_rfc;
 use crate::utility::structures::custom_deserialize::deserialize_percentage_float;
 
@@ -23,6 +29,23 @@ impl ZBFeedbackMessage {
 
     pub fn is_unexpected(&self) -> bool {
         matches!(&self, ZBFeedbackMessage::Unexpected(_))
+    }
+
+    pub fn as_str(&self) -> String {
+        let clone = self.clone();
+
+        if let Self::Message(message) = clone {
+            message
+        }
+        else if let Self::Unexpected(message) = clone {
+            message
+        }
+        else if let Self::MultipleMessages(messages) = clone {
+            messages.join("\n").to_string()
+        }
+        else {
+            format!("{:?}", self)
+        }
     }
 }
 
@@ -90,6 +113,143 @@ pub struct ZBFileStatus {
     #[serde(deserialize_with="deserialize_percentage_float")]
     pub complete_percentage: f32,
 }
+
+pub enum ZBBulkResponse {
+    Content(Bytes),
+    Feedback(ZBFileFeedback),
+}
+
+
+#[derive(Debug, Clone)]
+pub enum ZBFileContentType<'c> {
+    FilePath(String),
+    RawContent(&'c Vec<u8>),
+    Empty,
+}
+
+impl ZBFileContentType<'static> {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Empty => true,
+            Self::RawContent(vec) => vec.len() == 0,
+            _ => false,
+        }
+    }
+}
+
+pub struct ZBFile<'c> {
+    content_type: ZBFileContentType<'c>,
+    has_header_row: bool,
+    remove_duplicate: bool,
+    email_address_column: u32,
+    first_name_column: Option<u32>,
+    last_name_column: Option<u32>,
+    gender_column: Option<u32>,
+    ip_address_column: Option<u32>,
+}
+
+impl Default for ZBFile<'_> {
+    fn default() -> Self {
+        ZBFile {
+            content_type: ZBFileContentType::Empty,
+            has_header_row: true,
+            remove_duplicate: false,
+            email_address_column: 1,
+            first_name_column: None,
+            last_name_column: None,
+            gender_column: None,
+            ip_address_column: None,
+        }
+    }
+}
+
+impl ZBFile<'_> {
+
+    pub fn from_path(path_to_file: String) -> ZBFile<'static> {
+        let mut file = ZBFile::default();
+        file.content_type = ZBFileContentType::FilePath(path_to_file);
+        file
+    }
+
+    pub fn from_content<'c>(content: &'c Vec<u8>) -> ZBFile<'c> {
+        let mut file = ZBFile::default();
+        file.content_type = ZBFileContentType::RawContent(content);
+        file
+    }
+
+    fn file_content_multipart(&self) -> ZBResult<Part> {
+        match self.content_type.clone() {
+            ZBFileContentType::Empty => Err(ZBError::explicit("bulk content cannot be empty")),
+            ZBFileContentType::FilePath(file_path) => Ok(
+                Part::file(file_path.clone())?
+            ),
+            ZBFileContentType::RawContent(value) => Ok(
+                Part::bytes(value.clone())
+                    .file_name("file.csv")
+                    .mime_str("text/csv")?
+            ),
+        }
+    }
+
+    pub fn generate_multipart(&self) -> ZBResult<Form> {
+        let content_part = self.file_content_multipart()?;
+        let mut multipart_form = Form::new()
+            .part("file", content_part)
+            .text("has_header_row", self.has_header_row.to_string())
+            .text("remove_duplicate", self.remove_duplicate.to_string());
+
+        if let Some(amount) = self.first_name_column {
+            multipart_form = multipart_form.text("first_name_column", amount.to_string());
+        }
+        if let Some(amount) = self.last_name_column {
+            multipart_form = multipart_form.text("last_name_column", amount.to_string());
+        }
+        if let Some(amount) = self.gender_column {
+            multipart_form = multipart_form.text("gender_column", amount.to_string());
+        }
+        if let Some(amount) = self.ip_address_column {
+            multipart_form = multipart_form.text("ip_address_column", amount.to_string());
+        }
+
+        Ok(multipart_form)
+    }
+
+    pub fn set_has_header_row(mut self, has_header_row: bool) -> Self {
+        self.has_header_row = has_header_row;
+        self
+    }
+
+    pub fn set_remove_duplicate(mut self, remove_duplicate: bool) -> Self {
+        self.remove_duplicate = remove_duplicate;
+        self
+    }
+
+    pub fn set_email_address_column(mut self, email_address_column: u32) -> Self {
+        self.email_address_column = email_address_column;
+        self
+    }
+
+    pub fn set_first_name_column(mut self, first_name_column: Option<u32>) -> Self {
+        self.first_name_column = first_name_column;
+        self
+    }
+
+    pub fn set_last_name_column(mut self, last_name_column: Option<u32>) -> Self {
+        self.last_name_column = last_name_column;
+        self
+    }
+
+    pub fn set_gender_column(mut self, gender_column: Option<u32>) -> Self {
+        self.gender_column = gender_column;
+        self
+    }
+
+    pub fn set_ip_address_column(mut self, ip_address_column: Option<u32>) -> Self {
+        self.ip_address_column = ip_address_column;
+        self
+    }
+}
+
 
 #[cfg(test)]
 

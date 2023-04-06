@@ -1,3 +1,4 @@
+pub mod bulk;
 pub mod validation;
 
 use std::collections::HashMap;
@@ -27,20 +28,22 @@ impl ZeroBounce {
         ]);
 
         let response_content = self.generic_get_request(
-            ENDPOINT_CREDITS, query_args
+            self.url_provider.url_of(ENDPOINT_CREDITS), query_args
         )?;
 
         Self::get_credits_from_string(response_content)
     }
 
-    pub fn get_api_usage(&self, start_date: NaiveDate, end_date:NaiveDate) -> ZBResult<ApiUsage> {
+    pub fn get_api_usage(&self, start_date: NaiveDate, end_date: NaiveDate) -> ZBResult<ApiUsage> {
         let query_args = HashMap::from([
             ("api_key", self.api_key.clone()),
             ("start_date", start_date.format("%F").to_string()),
             ("end_date", end_date.format("%F").to_string()),
         ]);
 
-        let response_content = self.generic_get_request(ENDPOINT_API_USAGE, query_args)?;
+        let response_content = self.generic_get_request(
+            self.url_provider.url_of(ENDPOINT_API_USAGE), query_args
+        )?;
 
         let api_usage = from_str::<ApiUsage>(&response_content)?;
         Ok(api_usage)
@@ -57,7 +60,7 @@ impl ZeroBounce {
         ]);
 
         let response_content = self.generic_get_request(
-            ENDPOINT_ACTIVITY_DATA, query_args
+            self.url_provider.url_of(ENDPOINT_ACTIVITY_DATA), query_args
         )?;
 
         let activity_data = from_str::<ActivityData>(&response_content)?;
