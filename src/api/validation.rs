@@ -51,7 +51,7 @@ impl ZeroBounce {
     fn batch_validate_prepare_body(&self, emails_and_ip_addresses: Vec<(String, String)>) -> ZBResult<String> {
         let email_batch = emails_and_ip_addresses
             .into_iter()
-            .map(|(email, ip_address)| 
+            .map(|(email, ip_address)|
                 [
                     ("email_address".to_string(), Value::String(email)),
                     ("ip_address".to_string(), Value::String(ip_address)),
@@ -81,7 +81,7 @@ impl ZeroBounce {
     pub fn batch_validate(&self, emails_and_ip_addresses: Vec<(String, String)>) -> ZBResult<ZBBatchValidation> {
         let body_content = self.batch_validate_prepare_body(emails_and_ip_addresses)?;
         let url = self.url_provider.url_of(ENDPOINT_BATCH_VALIDATE);
-        
+
         let response = self.client.post(url)
             .body(body_content)
             .header("content-type", "application/json")

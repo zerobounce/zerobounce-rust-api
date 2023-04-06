@@ -77,7 +77,7 @@ mod tests {
     fn test_credits_negative() {
         let credits = ZeroBounce::get_credits_from_string(CREDITS_RESPONSE_NEGATIVE.to_string());
         assert!(credits.is_ok());
-        
+
         let amount = credits.unwrap();
         assert_eq!(amount, -1);
     }
@@ -86,7 +86,7 @@ mod tests {
     fn test_credits_ok() {
         let credits = ZeroBounce::get_credits_from_string(CREDITS_RESPONSE_OK.to_string());
         assert!(credits.is_ok());
-        
+
         let amount = credits.unwrap();
         assert_eq!(amount, 123456);
     }
