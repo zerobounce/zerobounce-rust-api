@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn forbidden_integration_test() {
-        let key = "c1b432f97c0145d0aca98b2f80b044da";
+        let key = "mock_api";
         let credits = ZeroBounce::new(key, reqwest::blocking::Client::new())
             .get_credits();
         assert!(credits.is_ok());
