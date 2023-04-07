@@ -1,10 +1,11 @@
 [package]
 name = "zero-bounce"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Wrapper library over the ZeroBounce API v2"
 homepage = "https://www.zerobounce.net"
 readme = "README.md"
+licence = "MIT"
 license-file = "LICENSE"
 repository = "https://github.com/zerobounce/zerobounce-rust-api"
 
