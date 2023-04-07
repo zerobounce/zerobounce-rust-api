@@ -5,7 +5,7 @@ edition = "2021"
 description = "Wrapper library over the ZeroBounce API v2"
 homepage = "https://www.zerobounce.net"
 readme = "README.md"
-license-file = "LICENSE.txt"
+license-file = "LICENSE"
 repository = "https://github.com/zerobounce/zerobounce-rust-api"
 keywords = ["zerobounce", "zero-bounce", "zero", "bounce", "api", "wrapper", "email", "validation"]
 
