@@ -48,11 +48,7 @@ impl ZeroBounce {
         }
     }
 
-    fn generic_get_request(
-        &self,
-        url: String,
-        query_args: HashMap<&str, &str>,
-    ) -> ZBResult<String> {
+    fn generic_get_request(&self,url: String,query_args: HashMap<&str, &str>,) -> ZBResult<String> {
         let response = self.client.get(url).query(&query_args).send()?;
 
         let response_ok = response.status().is_success();
