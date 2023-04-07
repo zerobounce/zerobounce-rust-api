@@ -36,8 +36,8 @@ impl ZeroBounce {
 
     pub fn generic_file_status_check(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileStatus> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.clone()),
-            ("file_id", file_id.to_string()),
+            ("api_key", self.api_key.as_str()),
+            ("file_id", file_id),
         ]);
 
         let response_content = self.generic_get_request(
@@ -50,8 +50,8 @@ impl ZeroBounce {
 
     pub fn generic_result_fetch<'c>(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBBulkResponse> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.clone()),
-            ("file_id", file_id.to_string()),
+            ("api_key", self.api_key.as_str()),
+            ("file_id", file_id),
         ]);
 
         let url = self.url_provider.bulk_url_of(endpoint);
@@ -87,8 +87,8 @@ impl ZeroBounce {
 
     pub fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback>{
         let query_args = HashMap::from([
-            ("api_key", self.api_key.clone()),
-            ("file_id", file_id.to_string()),
+            ("api_key", self.api_key.as_str()),
+            ("file_id", file_id),
         ]);
 
         let response_content = self.generic_get_request(
