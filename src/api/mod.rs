@@ -23,7 +23,7 @@ impl ZeroBounce {
 
     pub fn get_credits(&self) -> ZBResult<i64> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.clone()),
+            ("api_key", self.api_key.as_str()),
         ]);
 
         let response_content = self.generic_get_request(
@@ -34,10 +34,12 @@ impl ZeroBounce {
     }
 
     pub fn get_api_usage(&self, start_date: NaiveDate, end_date:NaiveDate) -> ZBResult<ApiUsage> {
+        let start_date_str = start_date.format("%F").to_string();
+        let end_date_str = end_date.format("%F").to_string();
         let query_args = HashMap::from([
-            ("api_key", self.api_key.clone()),
-            ("start_date", start_date.format("%F").to_string()),
-            ("end_date", end_date.format("%F").to_string()),
+            ("api_key", self.api_key.as_str()),
+            ("start_date", start_date_str.as_str()),
+            ("end_date", end_date_str.as_str()),
         ]);
 
         let response_content = self.generic_get_request(ENDPOINT_API_USAGE, query_args)?;
@@ -52,8 +54,8 @@ impl ZeroBounce {
 
     pub fn get_activity_data(&self, email: &str) -> ZBResult<ActivityData> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.clone()),
-            ("email", email.to_string().clone()),
+            ("api_key", self.api_key.as_str()),
+            ("email", email),
         ]);
 
         let response_content = self.generic_get_request(

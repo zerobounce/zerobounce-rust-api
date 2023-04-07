@@ -13,12 +13,12 @@ impl ZeroBounce {
 
     pub fn validate_email_and_ip(&self, email: &str, ip_address: &str) -> ZBResult<ZBValidation> {
         let mut query_args = HashMap::from([
-            ("api_key", self.api_key.clone()),
-            ("email", email.to_string().clone()),
+            ("api_key", self.api_key.as_str()),
+            ("email", email),
         ]);
 
         if ip_address.len() != 0 {
-            query_args.insert("ip_address", ip_address.to_string().clone());
+            query_args.insert("ip_address", ip_address);
         }
 
         let response_content = self.generic_get_request(

@@ -48,7 +48,7 @@ impl ZeroBounce {
     }
 
     fn generic_get_request(
-        &self, endpoint: &str, query_args: HashMap<&str, String>
+        &self, endpoint: &str, query_args: HashMap<&str, &str>
     ) -> ZBResult<String>
     {
 
