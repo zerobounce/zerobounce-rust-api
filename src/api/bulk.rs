@@ -13,8 +13,7 @@ use crate::utility::structures::bulk::{ZBBulkResponse, ZBFile, ZBFileFeedback, Z
 
 impl ZeroBounce {
 
-    // TODO: have generic functions not be public
-    pub fn generic_file_submit(&self, endpoint: &str, zb_file: &ZBFile) -> ZBResult<ZBFileFeedback> {
+    fn generic_file_submit(&self, endpoint: &str, zb_file: &ZBFile) -> ZBResult<ZBFileFeedback> {
         let multi_part_form = zb_file.generate_multipart()?;
         let url = self.url_provider.url_of(endpoint);
         let response = self.client.post(url)
@@ -36,7 +35,7 @@ impl ZeroBounce {
         Ok(feedback_object)
     }
 
-    pub fn generic_file_status_check(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileStatus> {
+    fn generic_file_status_check(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileStatus> {
         let query_args = HashMap::from([
             ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
@@ -50,7 +49,7 @@ impl ZeroBounce {
         Ok(file_status)
     }
 
-    pub fn generic_result_fetch(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBBulkResponse> {
+    fn generic_result_fetch(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBBulkResponse> {
         let query_args = HashMap::from([
             ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
@@ -87,7 +86,7 @@ impl ZeroBounce {
         Err(ZBError::ExplicitError(response_content))
     }
 
-    pub fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback>{
+    fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback>{
         let query_args = HashMap::from([
             ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
