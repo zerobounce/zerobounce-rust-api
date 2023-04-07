@@ -7,9 +7,8 @@ use chrono::{NaiveDate, Utc};
 use serde_json::from_str;
 
 pub use crate::ZeroBounce;
-pub use crate::utility::{ZBError, ZBResult};
-pub use crate::utility::structures::bulk::{ZBFile, ZBFileFeedback, ZBFileStatus};
-pub use crate::utility::structures::{ActivityData, ApiUsage};
+use crate::utility::{ZBError, ZBResult};
+use crate::utility::structures::{ActivityData, ApiUsage};
 use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS};
 
 impl ZeroBounce {

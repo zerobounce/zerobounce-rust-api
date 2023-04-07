@@ -1,12 +1,13 @@
 [package]
 name = "zero-bounce"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Wrapper library over the ZeroBounce API v2"
 homepage = "https://www.zerobounce.net"
 readme = "README.md"
 license-file = "LICENSE"
 repository = "https://github.com/zerobounce/zerobounce-rust-api"
+documentation = "https://docs.rs/zero-bounce"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

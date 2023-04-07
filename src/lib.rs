@@ -3,7 +3,9 @@ pub mod utility;
 
 use std::collections::HashMap;
 
-use crate::utility::{ZBError, ZBResult};
+pub use crate::utility::{ZBError, ZBResult};
+pub use crate::utility::structures::{ActivityData, ApiUsage};
+pub use crate::utility::structures::bulk::{ZBFile, ZBFileFeedback, ZBFileStatus};
 
 // Structure meant to generate the URLs to be accessed with the HTTP requests
 // based on the base API URLs (for the base API and bulk API).
