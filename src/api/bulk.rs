@@ -4,6 +4,8 @@ use serde_json::{Result as SerdeResult, from_str};
 
 use crate::ZeroBounce;
 use crate::utility::{ZBResult, ZBError};
+use crate::utility::{ENDPOINT_FILE_SEND, ENDPOINT_FILE_STATUS, ENDPOINT_FILE_RESULT, ENDPOINT_FILE_DELETE};
+use crate::utility::{ENDPOINT_SCORING_DELETE, ENDPOINT_SCORING_STATUS, ENDPOINT_SCORING_RESULT, ENDPOINT_SCORING_SEND};
 use crate::utility::structures::bulk::{ZBBulkResponse, ZBFile, ZBFileFeedback, ZBFileStatus};
 
 
@@ -48,7 +50,7 @@ impl ZeroBounce {
         Ok(file_status)
     }
 
-    pub fn generic_result_fetch<'c>(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBBulkResponse> {
+    pub fn generic_result_fetch(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBBulkResponse> {
         let query_args = HashMap::from([
             ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
@@ -98,5 +100,38 @@ impl ZeroBounce {
         let file_status = from_str::<ZBFileFeedback>(&response_content)?;
         Ok(file_status)
     }
+
+    pub fn bulk_validation_file_submit(&self, zb_file: &ZBFile) -> ZBResult<ZBFileFeedback> {
+        self.generic_file_submit(ENDPOINT_FILE_SEND, zb_file)
+    }
+
+    pub fn bulk_validation_file_status_check(&self, file_id: &str) -> ZBResult<ZBFileStatus> {
+        self.generic_file_status_check(ENDPOINT_FILE_STATUS, file_id)
+    }
+
+    pub fn bulk_validation_result_fetch(&self, file_id: &str) -> ZBResult<ZBBulkResponse> {
+        self.generic_result_fetch(ENDPOINT_FILE_RESULT, file_id)
+    }
+
+    pub fn bulk_validation_result_delete(&self, file_id: &str) -> ZBResult<ZBFileFeedback> {
+        self.generic_result_delete(ENDPOINT_FILE_DELETE, file_id)
+    }
+
+    pub fn ai_scoring_file_submit(&self, zb_file: &ZBFile) -> ZBResult<ZBFileFeedback> {
+        self.generic_file_submit(ENDPOINT_SCORING_SEND, zb_file)
+    }
+
+    pub fn ai_scoring_file_status_check(&self, file_id: &str) -> ZBResult<ZBFileStatus> {
+        self.generic_file_status_check(ENDPOINT_SCORING_STATUS, file_id)
+    }
+
+    pub fn ai_scoring_result_fetch(&self, file_id: &str) -> ZBResult<ZBBulkResponse> {
+        self.generic_result_fetch(ENDPOINT_SCORING_RESULT, file_id)
+    }
+
+    pub fn ai_scoring_result_delete(&self, file_id: &str) -> ZBResult<ZBFileFeedback> {
+        self.generic_result_delete(ENDPOINT_SCORING_DELETE, file_id)
+    }
+
 
 }
