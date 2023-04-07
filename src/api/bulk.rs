@@ -14,8 +14,10 @@ use crate::utility::structures::bulk::{ZBBulkResponse, ZBFile, ZBFileFeedback, Z
 impl ZeroBounce {
 
     fn generic_file_submit(&self, endpoint: &str, zb_file: &ZBFile) -> ZBResult<ZBFileFeedback> {
-        let multi_part_form = zb_file.generate_multipart()?;
-        let url = self.url_provider.url_of(endpoint);
+        let multi_part_form = zb_file.generate_multipart()?
+            .text("api_key", self.api_key.clone());
+
+        let url = self.url_provider.bulk_url_of(endpoint);
         let response = self.client.post(url)
             .multipart(multi_part_form)
             .send()?;
@@ -24,12 +26,12 @@ impl ZeroBounce {
 
         let feedback_result: SerdeResult<ZBFileFeedback> = from_str(&response_content);
         if feedback_result.is_err() {
-            return Err(ZBError::ExplicitError(response_content));
+            return Err(ZBError::ExplicitError(String::from("Response content: ") + &response_content));
         }
 
         let feedback_object = feedback_result.unwrap();
         if !feedback_object.success {
-            return Err(ZBError::ExplicitError(feedback_object.message.as_str()));
+            return Err(ZBError::ExplicitError(String::from("Feedback not success: ") + &feedback_object.message.as_str()));
         }
 
         Ok(feedback_object)

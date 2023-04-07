@@ -196,7 +196,8 @@ impl ZBFile<'_> {
         let mut multipart_form = Form::new()
             .part("file", content_part)
             .text("has_header_row", self.has_header_row.to_string())
-            .text("remove_duplicate", self.remove_duplicate.to_string());
+            .text("remove_duplicate", self.remove_duplicate.to_string())
+            .text("email_address_column", self.email_address_column.to_string());
 
         if let Some(amount) = self.first_name_column {
             multipart_form = multipart_form.text("first_name_column", amount.to_string());

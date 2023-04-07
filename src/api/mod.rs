@@ -3,13 +3,14 @@ pub mod validation;
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use serde_json::from_str;
 
-use crate::ZeroBounce;
-use crate::utility::{ZBError, ZBResult};
+pub use crate::ZeroBounce;
+pub use crate::utility::{ZBError, ZBResult};
+pub use crate::utility::structures::bulk::{ZBFile, ZBFileFeedback, ZBFileStatus};
+pub use crate::utility::structures::{ActivityData, ApiUsage};
 use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS};
-use crate::utility::structures::{ActivityData, ApiUsage};
 
 impl ZeroBounce {
 
@@ -52,7 +53,9 @@ impl ZeroBounce {
     }
 
     pub fn get_api_usage_overall(&self) -> ZBResult<ApiUsage> {
-        self.get_api_usage(NaiveDate::MIN, NaiveDate::MAX)
+        let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+        let end_date = Utc::now().naive_local().date();
+        self.get_api_usage(start_date, end_date)
     }
 
     pub fn get_activity_data(&self, email: &str) -> ZBResult<ActivityData> {
