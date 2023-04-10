@@ -54,3 +54,164 @@ pub const INVALID_API_RESPONSE: &str = r#"
     "error": "Missing parameter: api_key."
 }
 "#;
+
+pub const ACTIVITY_DATA_RESPONSE_ACTIVE: &str = r#"
+{
+    "found": true,
+    "active_in_days": "180"
+}
+"#;
+
+pub const ACTIVITY_DATA_RESPONSE_INACTIVE: &str = r#"
+{
+    "found": false,
+    "active_in_days": null
+}
+"#;
+
+pub const VALIDATION_RESPONSE_VALID: &str =  r#"
+{
+    "address": "valid@example.com",
+    "status": "valid",
+    "sub_status": "",
+    "free_email": false,
+    "did_you_mean": null,
+    "account": null,
+    "domain": null,
+    "domain_age_days": "9692",
+    "smtp_provider": "example",
+    "mx_found": "true",
+    "mx_record": "mx.example.com",
+    "firstname": "zero",
+    "lastname": "bounce",
+    "gender": "male",
+    "country": "United States",
+    "region": "Florida",
+    "city": "West Palm Beach",
+    "zipcode": "33401",
+    "processed_at": "2023-03-23 13:30:28.105"
+}
+"#;
+
+pub const VALIDATION_RESPONSE_INVALID: &str = r#"
+{
+    "address": "invalid@example.com",
+    "status": "invalid",
+    "sub_status": "mailbox_not_found",
+    "free_email": false,
+    "did_you_mean": null,
+    "account": null,
+    "domain": null,
+    "domain_age_days": "9692",
+    "smtp_provider": "example",
+    "mx_found": "true",
+    "mx_record": "mx.example.com",
+    "firstname": "zero",
+    "lastname": "bounce",
+    "gender": "male",
+    "country": "United States",
+    "region": "Florida",
+    "city": "West Palm Beach",
+    "zipcode": "33401",
+    "processed_at": "2023-03-23 12:30:28.003"
+}
+"#;
+
+pub const VALIDATION_RESPONSE_NULL_FIELDS: &str = r#"
+{
+    "address": "invalid@example.com",
+    "status": "invalid",
+    "sub_status": "failed_syntax_check",
+    "free_email": false,
+    "did_you_mean": null,
+    "account": "",
+    "domain": null,
+    "domain_age_days": "",
+    "smtp_provider": "",
+    "mx_found": "false",
+    "mx_record": null,
+    "firstname": "",
+    "lastname": "",
+    "gender": "",
+    "country": null,
+    "region": null,
+    "city": null,
+    "zipcode": null,
+    "processed_at": "2023-04-05 08:55:40.661"
+}
+"#;
+
+pub const BATCH_VALIDATION_WITH_ERROR: &str = r#"
+{
+    "email_batch": [
+        {
+            "address": "valid@example.com",
+            "status": "valid",
+            "sub_status": "",
+            "free_email": false,
+            "did_you_mean": null,
+            "account": null,
+            "domain": null,
+            "domain_age_days": "9692",
+            "smtp_provider": "example",
+            "mx_found": "true",
+            "mx_record": "mx.example.com",
+            "firstname": "zero",
+            "lastname": "bounce",
+            "gender": "male",
+            "country": "United States",
+            "region": "Florida",
+            "city": "West Palm Beach",
+            "zipcode": "33401",
+            "processed_at": "2023-03-23 13:30:28.105"
+        }
+    ],
+    "errors": [
+        {
+            "error": "Mock error message",
+            "email_address": "invalid@example.com"
+        }
+    ]
+}
+"#;
+
+pub const BATCH_VALIDATION_ERROR_ONLY: &str = r#"
+{
+    "email_batch": [],
+    "errors": [
+        {
+            "error": "Mock error message",
+            "email_address": "invalid@example.com"
+        }
+    ]
+}
+"#;
+
+pub const BATCH_VALIDATION_NO_ERROR: &str = r#"
+{
+    "email_batch": [
+        {
+            "address": "valid@example.com",
+            "status": "valid",
+            "sub_status": "",
+            "free_email": false,
+            "did_you_mean": null,
+            "account": null,
+            "domain": null,
+            "domain_age_days": "9692",
+            "smtp_provider": "example",
+            "mx_found": "true",
+            "mx_record": "mx.example.com",
+            "firstname": "zero",
+            "lastname": "bounce",
+            "gender": "male",
+            "country": "United States",
+            "region": "Florida",
+            "city": "West Palm Beach",
+            "zipcode": "33401",
+            "processed_at": "2023-03-23 13:30:28.105"
+        }
+    ],
+    "errors": []
+}
+"#;

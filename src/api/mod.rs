@@ -1,19 +1,16 @@
+pub mod validation;
+
 use std::collections::HashMap;
 
 use chrono::{NaiveDate, Utc};
 use serde_json::from_str;
 
-use crate::{ZeroBounce, ZBUrlProvider};
-use crate::utility::{ZBError, ZBResult, structures::ApiUsage};
+use crate::ZeroBounce;
+use crate::utility::{ZBError, ZBResult};
+use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS};
+use crate::utility::structures::{ActivityData, ApiUsage};
 
 impl ZeroBounce {
-    pub fn new(api_key: &str) -> ZeroBounce {
-        ZeroBounce {
-            api_key: api_key.to_string().clone(),
-            client: reqwest::blocking::Client::default(),
-            url_provider: ZBUrlProvider::default()
-        }
-    }
 
     fn get_credits_from_string(string_value: String) -> ZBResult<i64> {
         from_str::<serde_json::Value>(string_value.as_ref())?
@@ -25,47 +22,27 @@ impl ZeroBounce {
     }
 
     pub fn get_credits(&self) -> ZBResult<i64> {
-        let url = self.url_provider.url_of(crate::utility::ENDPOINT_CREDITS);
-        let mut query_args = HashMap::<&str, String>::new();
+        let query_args = HashMap::from([
+            ("api_key", self.api_key.as_str()),
+        ]);
 
-        query_args.insert("api_key", self.api_key.clone());
-
-        let response = self.client.get(url)
-            .query(&query_args)
-            .send()?;
-
-        let response_ok = response.status().is_success();
-        let response_content = response
-            .text()?;
-
-        if !response_ok {
-            return Err(ZBError::explicit(response_content.as_str()));
-        }
+        let response_content = self.generic_get_request(
+            ENDPOINT_CREDITS, query_args
+        )?;
 
         Self::get_credits_from_string(response_content)
     }
 
     pub fn get_api_usage(&self, start_date: NaiveDate, end_date:NaiveDate) -> ZBResult<ApiUsage> {
-        let url = self.url_provider.url_of(crate::utility::ENDPOINT_API_USAGE);
-
-        let mut query_args = HashMap::<&str, String>::new();
         let start_date_str = start_date.format("%F").to_string();
         let end_date_str = end_date.format("%F").to_string();
+        let query_args = HashMap::from([
+            ("api_key", self.api_key.as_str()),
+            ("start_date", start_date_str.as_str()),
+            ("end_date", end_date_str.as_str()),
+        ]);
 
-        query_args.insert("api_key", self.api_key.clone());
-        query_args.insert("start_date", start_date_str);
-        query_args.insert("end_date", end_date_str);
-
-        let response = self.client.get(url)
-            .query(&query_args)
-            .send()?;
-
-        let response_ok = response.status().is_success();
-        let response_content = response.text()?;
-
-        if !response_ok {
-            return Err(ZBError::explicit(response_content.as_str()));
-        }
+        let response_content = self.generic_get_request(ENDPOINT_API_USAGE, query_args)?;
 
         let api_usage = from_str::<ApiUsage>(&response_content)?;
         Ok(api_usage)
@@ -75,6 +52,20 @@ impl ZeroBounce {
         let start_date = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
         let end_date = Utc::now().naive_local().date();
         self.get_api_usage(start_date, end_date)
+    }
+
+    pub fn get_activity_data(&self, email: &str) -> ZBResult<ActivityData> {
+        let query_args = HashMap::from([
+            ("api_key", self.api_key.as_str()),
+            ("email", email),
+        ]);
+
+        let response_content = self.generic_get_request(
+            ENDPOINT_ACTIVITY_DATA, query_args
+        )?;
+
+        let activity_data = from_str::<ActivityData>(&response_content)?;
+        Ok(activity_data)
     }
 
 }

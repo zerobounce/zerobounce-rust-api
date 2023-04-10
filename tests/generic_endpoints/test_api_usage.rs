@@ -1,29 +1,19 @@
 use chrono::NaiveDate;
 
-use zero_bounce::{ZBUrlProvider, ZeroBounce};
 use zero_bounce::utility::{ENDPOINT_API_USAGE, ZBError, mock_constants};
 
-use crate::common::{INVALID_URL, MOCK_API_KEY};
-use crate::common::{instantiate, endpoint_matcher};
+use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
 
 #[test]
 fn test_api_usage_client_error() {
     // no mock server
-    let zb_instance = ZeroBounce {
-        api_key: MOCK_API_KEY.to_string().clone(),
-        client: reqwest::blocking::Client::default(),
-        url_provider: ZBUrlProvider {
-            url: INVALID_URL.to_owned(),
-            bulk_url: INVALID_URL.to_owned(),
-        },
-    };
-
+    let zb_instance = invalid_url_zb_instance();
     let api_usage = zb_instance.get_api_usage_overall();
     assert!(api_usage.is_err());
 
-    let api_usage_error = api_usage.unwrap_err();
-    let ZBError::RequestError(_) = api_usage_error else {
-        panic!("unexpected error: {:#?}", api_usage_error);
+    let zb_error = api_usage.unwrap_err();
+    let ZBError::RequestError(_) = zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
     };
 }
 
@@ -40,9 +30,9 @@ fn test_api_usage_invalid_json() {
     assert!(api_usage.is_err());
     mock.assert();
 
-    let api_usage_error = api_usage.unwrap_err();
-    let ZBError::JsonError(_) = api_usage_error else {
-        panic!("unexpected error: {:#?}", api_usage_error);
+    let zb_error = api_usage.unwrap_err();
+    let ZBError::JsonError(_) = zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
     };
 }
 
@@ -60,9 +50,9 @@ fn test_api_usage_bad_request() {
     assert!(api_usage.is_err());
     mock.assert();
 
-    let api_usage_error = api_usage.unwrap_err();
-    let ZBError::ExplicitError(_) = api_usage_error else {
-        panic!("unexpected error: {:#?}", api_usage_error);
+    let zb_error = api_usage.unwrap_err();
+    let ZBError::ExplicitError(_) = zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
     };
 }
 
