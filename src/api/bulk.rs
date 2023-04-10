@@ -21,15 +21,13 @@ impl ZeroBounce {
             .multipart(multi_part_form)
             .send()?;
 
+        let response_ok = response.status().is_success();
         let response_content = response.text()?;
-
-        let feedback_object = from_str::<ZBFileFeedback>(&response_content)?;
-        if !feedback_object.success {
-            return Err(ZBError::ExplicitError(
-                String::from("Feedback not success: ") + &feedback_object.message.as_str()
-            ));
+        if !response_ok {
+            return Err(ZBError::ExplicitError(response_content));
         }
 
+        let feedback_object = from_str::<ZBFileFeedback>(&response_content)?;
         Ok(feedback_object)
     }
 
