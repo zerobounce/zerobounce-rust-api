@@ -1,4 +1,4 @@
-use zero_bounce::utility::{ENDPOINT_VALIDATE, ZBError, mock_constants};
+use zero_bounce::utility::{ENDPOINT_VALIDATE, CONTENT_TYPE_JSON, ZBError, mock_constants};
 
 use crate::common::{EMAIL, SANDBOX_IP};
 use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
@@ -40,7 +40,7 @@ fn test_simple_validation_bad_request() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_VALIDATE))
         .with_status(400)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::INVALID_API_RESPONSE.clone())
         .create();
 
@@ -60,7 +60,7 @@ fn test_simple_validation_ok() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_VALIDATE))
         .with_status(200)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::VALIDATION_RESPONSE_VALID.clone())
         .match_query(mockito::Matcher::UrlEncoded("email".to_string(), EMAIL.to_string()))
         .create();
@@ -77,7 +77,7 @@ fn test_simple_validation_with_ip_ok() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_VALIDATE))
         .with_status(200)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::VALIDATION_RESPONSE_VALID.clone())
         .match_query(mockito::Matcher::UrlEncoded("email".to_string(), EMAIL.to_string()))
         .match_query(mockito::Matcher::UrlEncoded("ip_address".to_string(), SANDBOX_IP.to_string()))

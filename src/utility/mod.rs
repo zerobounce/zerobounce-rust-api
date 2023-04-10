@@ -3,6 +3,8 @@ use std::io::Error as IOError;
 pub mod structures;
 pub mod mock_constants;
 
+pub const CONTENT_TYPE_JSON: &str = "application/json";
+pub const CONTENT_TYPE_STREAM: &str = "application/octet-stream";
 
 pub const URI: &str = "https://api.zerobounce.net/v2";
 pub const BULK_URI: &str = "https://bulkapi.zerobounce.net/v2";

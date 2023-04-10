@@ -1,6 +1,7 @@
 use chrono::{DateTime, FixedOffset, NaiveDateTime, NaiveDate};
 
 use serde::de::Error as SerdeError;
+use serde_json::Value;
 
 
 pub(crate) fn deserialize_naive_date<'de, D>(
@@ -53,7 +54,7 @@ pub(crate) fn deserialize_date_rfc<'de, D>(
     deserializer: D,
 ) -> Result<DateTime<FixedOffset>, D::Error>
 where
-    D: serde::Deserializer<'de>,
+    D: serde::Deserializer<'de>
 {
     let string: &str = serde::Deserialize::deserialize(deserializer)?;
     DateTime::parse_from_rfc3339(string).map_err(SerdeError::custom)
@@ -62,7 +63,7 @@ where
 // Expecting a
 pub(crate) fn deserialize_percentage_float<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
-    D: serde::Deserializer<'de>,
+    D: serde::Deserializer<'de>
 {
     let string: &str = serde::Deserialize::deserialize(deserializer)?;
 
@@ -74,4 +75,42 @@ where
         .unwrap_or(-1.);
 
     Ok(amount)
+}
+
+
+// More context for this function.
+//
+// The `message` field of the file validation endpoints
+// (both for bulk validation and AI scoring) does not have a consistent
+// structure. For that reason, this generic implementation was chosen.
+pub(crate) fn deserialize_generic_message<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>
+{
+    let base_error = String::from("[zb message] could not de-serialize ");
+    let json_value: Value = serde::Deserialize::deserialize(deserializer)?;
+
+    // check if message is a single string message
+    if json_value.is_string() {
+        let string_value = json_value
+            .as_str()
+            .ok_or(SerdeError::custom(base_error + "string"))?;
+
+        return Ok(string_value.to_string());
+    }
+
+    // check if message is a list of messages message
+    if json_value.is_array() {
+        let array_of_values = json_value
+            .as_array()
+            .ok_or(SerdeError::custom(base_error + "array of strings"))?
+            .into_iter()
+            .map(|v| v.as_str().unwrap_or("").to_string())
+            .collect::<Vec<String>>();
+
+        return Ok(array_of_values.join("\n"));
+    }
+
+    // fallback by returning it whole
+    Ok(json_value.to_string())
 }

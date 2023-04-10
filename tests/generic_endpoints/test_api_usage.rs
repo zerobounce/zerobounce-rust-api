@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 
-use zero_bounce::utility::{ENDPOINT_API_USAGE, ZBError, mock_constants};
+use zero_bounce::utility::{ENDPOINT_API_USAGE, CONTENT_TYPE_JSON, ZBError, mock_constants};
 
 use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
 
@@ -42,7 +42,7 @@ fn test_api_usage_bad_request() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_API_USAGE))
         .with_status(400)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::INVALID_API_RESPONSE.clone())
         .create();
 
@@ -62,7 +62,7 @@ fn test_api_usage_ok() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_API_USAGE))
         .with_status(200)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::API_USAGE_RESPONSE.clone())
         .create();
 

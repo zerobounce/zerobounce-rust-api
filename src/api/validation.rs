@@ -5,7 +5,7 @@ use serde_json::from_str;
 use serde_json::{Map as SerdeMap, Value};
 
 use crate::{ZeroBounce,  ZBResult};
-use crate::utility::{ENDPOINT_VALIDATE, ZBError, ENDPOINT_BATCH_VALIDATE};
+use crate::utility::{ENDPOINT_VALIDATE, ZBError, ENDPOINT_BATCH_VALIDATE, CONTENT_TYPE_JSON};
 use crate::utility::structures::validation::{ZBValidation, ZBBatchValidation};
 
 
@@ -84,7 +84,7 @@ impl ZeroBounce {
 
         let response = self.client.post(url)
             .body(body_content)
-            .header("content-type", "application/json")
+            .header("content-type", CONTENT_TYPE_JSON)
             .send()?;
 
         let response_ok = response.status().is_success();

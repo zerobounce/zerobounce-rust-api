@@ -4,95 +4,21 @@ use bytes::Bytes;
 use chrono::{DateTime, FixedOffset};
 use reqwest::blocking::multipart::{Form, Part};
 
-use serde::{Deserialize, de::Error as SerdeError};
-use serde_json::Value;
+use serde::Deserialize;
 
 use crate::utility::{ZBResult, ZBError};
 use crate::utility::structures::custom_deserialize::deserialize_date_rfc;
+use crate::utility::structures::custom_deserialize::deserialize_generic_message;
 use crate::utility::structures::custom_deserialize::deserialize_percentage_float;
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum ZBFeedbackMessage {
-    Message(String),
-    MultipleMessages(Vec<String>),
-    Unexpected(String),
-}
-
-impl ZBFeedbackMessage {
-    pub fn is_message(&self) -> bool {
-        matches!(&self, ZBFeedbackMessage::Message(_))
-    }
-
-    pub fn are_multiple_messages(&self) -> bool {
-        matches!(&self, ZBFeedbackMessage::MultipleMessages(_))
-    }
-
-    pub fn is_unexpected(&self) -> bool {
-        matches!(&self, ZBFeedbackMessage::Unexpected(_))
-    }
-
-    pub fn as_str(&self) -> String {
-        let clone = self.clone();
-
-        if let Self::Message(message) = clone {
-            message
-        }
-        else if let Self::Unexpected(message) = clone {
-            message
-        }
-        else if let Self::MultipleMessages(messages) = clone {
-            messages.join("\n").to_string()
-        }
-        else {
-            format!("{:?}", self)
-        }
-    }
-}
-
-// Why does `ZBValidationMessage` enum exist?
-//
-// Because the `message` field of the file validation endpoints
-// (both for bulk validation and AI scoring) does not have a consistent
-// structure. For that reason, this generic implementation was chosen.
-impl<'de> serde::Deserialize<'de> for ZBFeedbackMessage {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let base_error = String::from("[zb file message] could not de-serialize ");
-        let json_value: Value = serde::Deserialize::deserialize(deserializer)?;
-
-        // check if message is a single string message
-        if json_value.is_string() {
-            let string_value = json_value
-                .as_str()
-                .ok_or(SerdeError::custom(base_error + "string"))?;
-
-            return Ok(ZBFeedbackMessage::Message(string_value.to_string()));
-        }
-
-        // check if message is a list of messages message
-        if json_value.is_array() {
-            let array_of_values = json_value
-                .as_array()
-                .ok_or(SerdeError::custom(base_error + "array of strings"))?
-                .into_iter()
-                .map(|v| v.as_str().unwrap_or("").to_string())
-                .collect::<Vec<String>>();
-
-            return Ok(ZBFeedbackMessage::MultipleMessages(array_of_values));
-        }
-
-        // fallback by returning it whole
-        Ok(ZBFeedbackMessage::Unexpected(json_value.to_string()))
-    }
-
-}
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBFileFeedback {
     pub success: bool,
-    pub message: ZBFeedbackMessage,
+
+    #[serde(deserialize_with="deserialize_generic_message")]
+    pub message: String,
+
     pub file_name: Option<String>,
     pub file_id: Option<String>,
 }
@@ -119,15 +45,27 @@ pub enum ZBBulkResponse {
     Feedback(ZBFileFeedback),
 }
 
+impl Debug for ZBBulkResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            Self::Content(cnt) => {
+                write!(f, "<ZBBulkResponse::Content | size {}>", cnt.len())
+            },
+            Self::Feedback(feedback) => {
+                write!(f, "<ZBBulkResponse::Feedback | {:#?}>", feedback)
+            },
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
-pub enum ZBFileContentType<'c> {
+pub enum ZBFileContentType {
     FilePath(String),
-    RawContent(&'c Vec<u8>),
+    RawContent(Vec<u8>),
     Empty,
 }
 
-impl ZBFileContentType<'static> {
+impl ZBFileContentType {
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Empty => true,
@@ -137,8 +75,8 @@ impl ZBFileContentType<'static> {
     }
 }
 
-pub struct ZBFile<'c> {
-    content_type: ZBFileContentType<'c>,
+pub struct ZBFile {
+    content_type: ZBFileContentType,
     has_header_row: bool,
     remove_duplicate: bool,
     email_address_column: u32,
@@ -148,7 +86,7 @@ pub struct ZBFile<'c> {
     ip_address_column: Option<u32>,
 }
 
-impl Default for ZBFile<'_> {
+impl Default for ZBFile {
     fn default() -> Self {
         ZBFile {
             content_type: ZBFileContentType::Empty,
@@ -163,15 +101,15 @@ impl Default for ZBFile<'_> {
     }
 }
 
-impl ZBFile<'_> {
+impl ZBFile {
 
-    pub fn from_path(path_to_file: String) -> ZBFile<'static> {
+    pub fn from_path(path_to_file: String) -> ZBFile {
         let mut file = ZBFile::default();
         file.content_type = ZBFileContentType::FilePath(path_to_file);
         file
     }
 
-    pub fn from_content<'c>(content: &'c Vec<u8>) -> ZBFile<'c> {
+    pub fn from_content(content: Vec<u8>) -> ZBFile {
         let mut file = ZBFile::default();
         file.content_type = ZBFileContentType::RawContent(content);
         file
@@ -277,7 +215,7 @@ mod test {
         assert_eq!(validation_obj.success, true);
         assert!(validation_obj.file_id.is_some());
         assert!(validation_obj.file_name.is_some());
-        assert!(validation_obj.message.is_message(), "{:#?}", validation_obj.message);
+        assert_eq!(validation_obj.message, "File Accepted");
     }
 
     #[test]
@@ -335,9 +273,9 @@ mod test {
 
         let feedback_obj = feedback.unwrap();
         assert_eq!(feedback_obj.success, true);
-        assert!(feedback_obj.message.is_message(), "{:#?}", feedback_obj.message);
         assert!(feedback_obj.file_id.is_some());
         assert!(feedback_obj.file_name.is_some());
+        assert_eq!(feedback_obj.message, "File Deleted");
     }
 
     #[test]
@@ -347,10 +285,18 @@ mod test {
 
         let feedback_obj = feedback.unwrap();
         assert_eq!(feedback_obj.success, false);
-        assert!(feedback_obj.message.are_multiple_messages(), "{:#?}", feedback_obj.message);
 
-        if let ZBFeedbackMessage::MultipleMessages(messages) = feedback_obj.message {
-            assert_eq!(messages.len(), 2);
+        let expected_messages = [
+            "Mock message 1",
+            "Mock message 2"
+        ];
+        for message in expected_messages {
+            assert!(
+                feedback_obj.message.contains(message),
+                "`{}` not containing `{}",
+                feedback_obj.message,
+                message
+            );
         }
     }
 
@@ -361,7 +307,7 @@ mod test {
 
         let feedback_obj = feedback.unwrap();
         assert_eq!(feedback_obj.success, false);
-        assert!(feedback_obj.message.is_unexpected(), "{:#?}", feedback_obj.message);
+        assert!(feedback_obj.message.contains("Mock message"), "{}", feedback_obj.message);
     }
 
 }

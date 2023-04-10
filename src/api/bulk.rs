@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
-use serde_json::{Result as SerdeResult, from_str};
+use serde_json::from_str;
 
 use crate::ZeroBounce;
 use crate::utility::{ZBResult, ZBError};
+use crate::utility::{CONTENT_TYPE_JSON, CONTENT_TYPE_STREAM};
 use crate::utility::{ENDPOINT_FILE_SEND, ENDPOINT_FILE_STATUS, ENDPOINT_FILE_RESULT, ENDPOINT_FILE_DELETE};
 use crate::utility::{ENDPOINT_SCORING_DELETE, ENDPOINT_SCORING_STATUS, ENDPOINT_SCORING_RESULT, ENDPOINT_SCORING_SEND};
 use crate::utility::structures::bulk::{ZBBulkResponse, ZBFile, ZBFileFeedback, ZBFileStatus};
-
-
 
 
 impl ZeroBounce {
@@ -24,12 +23,7 @@ impl ZeroBounce {
 
         let response_content = response.text()?;
 
-        let feedback_result: SerdeResult<ZBFileFeedback> = from_str(&response_content);
-        if feedback_result.is_err() {
-            return Err(ZBError::ExplicitError(String::from("Response content: ") + &response_content));
-        }
-
-        let feedback_object = feedback_result.unwrap();
+        let feedback_object = from_str::<ZBFileFeedback>(&response_content)?;
         if !feedback_object.success {
             return Err(ZBError::ExplicitError(String::from("Feedback not success: ") + &feedback_object.message.as_str()));
         }
@@ -57,7 +51,7 @@ impl ZeroBounce {
             ("file_id", file_id),
         ]);
 
-        let url = self.url_provider.bulk_url_of(endpoint);
+        let url = &self.url_provider.bulk_url_of(endpoint);
         let response = self.client
             .get(url)
             .query(&query_args)
@@ -69,23 +63,36 @@ impl ZeroBounce {
             .get("Content-Type")
             .ok_or(ZBError::explicit("content type not specified in response"))?
             .to_str()
-            .map_err(|error| ZBError::ExplicitError(error.to_string()))?;
+            .map_err(|error| ZBError::ExplicitError(error.to_string()))?
+            .to_string();
 
-        // return content type
-        if response.status().is_success() && content_type == "application/octet-stream" {
+        let status_amount = response.status().as_u16();
+        if !response.status().is_success() {
+            let response_content = response.text()?;
+            return Err(ZBError::ExplicitError(response_content))
+        }
+
+        if content_type == CONTENT_TYPE_STREAM {
             let content = response.bytes()?;
             return Ok(ZBBulkResponse::Content(content));
         }
 
-        // error, either json format (file feedback) or unknown
         let response_content = response.text()?;
-        let feedback = from_str::<ZBFileFeedback>(&response_content);
-
-        if feedback.is_ok() {
-            return Ok(ZBBulkResponse::Feedback(feedback.unwrap()));
+        if content_type == CONTENT_TYPE_JSON {
+            let feedback = from_str::<ZBFileFeedback>(&response_content);
+            if feedback.is_ok() {
+                return Ok(ZBBulkResponse::Feedback(feedback.unwrap()));
+            }
         }
 
-        Err(ZBError::ExplicitError(response_content))
+        // content was not the expected one
+        let error_ = format!(
+            "Status: {}. Content-type: {}. Response content: {}",
+            status_amount,
+            content_type,
+            response_content,
+        );
+        Err(ZBError::ExplicitError(error_))
     }
 
     fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback>{

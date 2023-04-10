@@ -1,4 +1,4 @@
-use zero_bounce::utility::{ENDPOINT_CREDITS, ZBError, mock_constants};
+use zero_bounce::utility::{ENDPOINT_CREDITS, CONTENT_TYPE_JSON, ZBError, mock_constants};
 
 use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
 
@@ -40,7 +40,7 @@ fn test_credits_bad_request() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_CREDITS))
         .with_status(400)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::INVALID_API_RESPONSE.clone())
         .create();
 
@@ -60,7 +60,7 @@ fn test_credits_negative_response() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_CREDITS))
         .with_status(200)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::CREDITS_RESPONSE_NEGATIVE.clone())
         .create();
 
@@ -78,7 +78,7 @@ fn test_credits_ok() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_CREDITS))
         .with_status(200)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::CREDITS_RESPONSE_OK.clone())
         .create();
 
