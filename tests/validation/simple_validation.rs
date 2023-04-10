@@ -80,7 +80,9 @@ fn test_simple_validation_with_ip_ok() {
         .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::VALIDATION_RESPONSE_VALID.clone())
         .match_query(mockito::Matcher::UrlEncoded("email".to_string(), EMAIL.to_string()))
-        .match_query(mockito::Matcher::UrlEncoded("ip_address".to_string(), SANDBOX_IP.to_string()))
+        .match_query(mockito::Matcher::UrlEncoded(
+            "ip_address".to_string(), SANDBOX_IP.to_string()
+        ))
         .create();
 
     // start_date, end_date will not match the response, as the API should

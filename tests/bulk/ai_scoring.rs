@@ -1,5 +1,8 @@
-use zero_bounce::{utility::{ENDPOINT_SCORING_SEND, mock_constants, ENDPOINT_SCORING_STATUS, ENDPOINT_SCORING_RESULT, structures::bulk::ZBBulkResponse, ENDPOINT_SCORING_DELETE}, ZBError};
+use zero_bounce::ZBError;
+use zero_bounce::utility::mock_constants;
+use zero_bounce::utility::structures::bulk::ZBBulkResponse;
 use zero_bounce::utility::{CONTENT_TYPE_JSON, CONTENT_TYPE_STREAM};
+use zero_bounce::utility::{ENDPOINT_SCORING_SEND, ENDPOINT_SCORING_STATUS, ENDPOINT_SCORING_RESULT, ENDPOINT_SCORING_DELETE};
 
 
 use crate::common::{instantiate, endpoint_matcher, generate_zb_file};

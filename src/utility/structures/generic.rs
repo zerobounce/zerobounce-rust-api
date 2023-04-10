@@ -60,7 +60,9 @@ mod tests {
 
     #[test]
     fn parse_activity_date_without_amount() {
-        let activity_data_res: serde_json::Result<ActivityData> = serde_json::from_str(ACTIVITY_DATA_RESPONSE_INACTIVE);
+        let activity_data_res = serde_json::from_str::<ActivityData>(
+            ACTIVITY_DATA_RESPONSE_INACTIVE
+        );
         assert!(activity_data_res.is_ok(), "error: {}", activity_data_res.unwrap_err());
 
         let activity_data = activity_data_res.unwrap();

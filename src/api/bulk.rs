@@ -25,7 +25,9 @@ impl ZeroBounce {
 
         let feedback_object = from_str::<ZBFileFeedback>(&response_content)?;
         if !feedback_object.success {
-            return Err(ZBError::ExplicitError(String::from("Feedback not success: ") + &feedback_object.message.as_str()));
+            return Err(ZBError::ExplicitError(
+                String::from("Feedback not success: ") + &feedback_object.message.as_str()
+            ));
         }
 
         Ok(feedback_object)

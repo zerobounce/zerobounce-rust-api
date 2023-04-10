@@ -1,7 +1,8 @@
 use zero_bounce::ZBError;
-use zero_bounce::utility::{mock_constants, ENDPOINT_FILE_SEND, ENDPOINT_FILE_STATUS, ENDPOINT_FILE_RESULT, ENDPOINT_FILE_DELETE};
+use zero_bounce::utility::mock_constants;
 use zero_bounce::utility::structures::bulk::ZBBulkResponse;
 use zero_bounce::utility::{CONTENT_TYPE_JSON, CONTENT_TYPE_STREAM};
+use zero_bounce::utility::{ENDPOINT_FILE_SEND, ENDPOINT_FILE_STATUS, ENDPOINT_FILE_RESULT, ENDPOINT_FILE_DELETE};
 
 
 use crate::common::{instantiate, endpoint_matcher, generate_zb_file};
