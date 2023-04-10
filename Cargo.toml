@@ -1,6 +1,6 @@
 [package]
 name = "zero-bounce"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Wrapper library over the ZeroBounce API v2"
 homepage = "https://www.zerobounce.net"
