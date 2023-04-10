@@ -9,8 +9,9 @@ where
     D: serde::Deserializer<'de>,
 {
     let string: &str = serde::Deserialize::deserialize(deserializer)?;
-    let stripped_string = string.replace('"', "");
-    NaiveDate::parse_from_str(stripped_string.as_str(), "%m/%d/%Y").map_err(SerdeError::custom)
+    let format = "%m/%d/%Y";
+    NaiveDate::parse_from_str(string, format)
+        .map_err(SerdeError::custom)
 }
 
 pub(crate) fn deserialize_stringified_uint<'de, D>(
