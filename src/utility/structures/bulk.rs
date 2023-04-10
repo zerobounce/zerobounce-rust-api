@@ -8,17 +8,13 @@ use serde::Deserialize;
 
 use crate::utility::{ZBResult, ZBError};
 use crate::utility::structures::custom_deserialize::deserialize_date_rfc;
-use crate::utility::structures::custom_deserialize::deserialize_generic_message;
 use crate::utility::structures::custom_deserialize::deserialize_percentage_float;
 
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBFileFeedback {
     pub success: bool,
-
-    #[serde(deserialize_with="deserialize_generic_message")]
     pub message: String,
-
     pub file_name: Option<String>,
     pub file_id: Option<String>,
 }
@@ -202,8 +198,6 @@ mod test {
     use crate::utility::mock_constants::BULK_VALIDATION_STATUS_DELETED;
     use crate::utility::mock_constants::BULK_VALIDATION_RESULT_DELETED;
     use crate::utility::mock_constants::BULK_VALIDATION_DELETE_OK;
-    use crate::utility::mock_constants::FILE_FEEDBACK_SUPPORTED_VARIANT_1;
-    use crate::utility::mock_constants::FILE_FEEDBACK_SUPPORTED_VARIANT_2;
 
 
     #[test]
@@ -276,38 +270,6 @@ mod test {
         assert!(feedback_obj.file_id.is_some());
         assert!(feedback_obj.file_name.is_some());
         assert_eq!(feedback_obj.message, "File Deleted");
-    }
-
-    #[test]
-    fn test_parse_file_feedback_multiple_error_message() {
-        let feedback: SerdeResult<ZBFileFeedback> = from_str(FILE_FEEDBACK_SUPPORTED_VARIANT_1);
-        assert!(feedback.is_ok());
-
-        let feedback_obj = feedback.unwrap();
-        assert_eq!(feedback_obj.success, false);
-
-        let expected_messages = [
-            "Mock message 1",
-            "Mock message 2"
-        ];
-        for message in expected_messages {
-            assert!(
-                feedback_obj.message.contains(message),
-                "`{}` not containing `{}",
-                feedback_obj.message,
-                message
-            );
-        }
-    }
-
-    #[test]
-    fn test_parse_file_feedback_unexpected_format() {
-        let feedback: SerdeResult<ZBFileFeedback> = from_str(FILE_FEEDBACK_SUPPORTED_VARIANT_2);
-        assert!(feedback.is_ok());
-
-        let feedback_obj = feedback.unwrap();
-        assert_eq!(feedback_obj.success, false);
-        assert!(feedback_obj.message.contains("Mock message"), "{}", feedback_obj.message);
     }
 
 }

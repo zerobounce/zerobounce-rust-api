@@ -281,23 +281,3 @@ pub const BULK_VALIDATION_DELETE_NOT_FOUND: &str = r#"
     "message": "File cannot be found."
 }
 "#;
-
-pub const FILE_FEEDBACK_SUPPORTED_VARIANT_1: &str = r#"
-{
-    "success": false,
-    "message": [
-        "Mock message 1",
-        "Mock message 2"
-    ]
-}
-"#;
-
-
-pub const FILE_FEEDBACK_SUPPORTED_VARIANT_2: &str = r#"
-{
-    "success": false,
-    "message": {
-        "file_id": ["Mock message"]
-    }
-}
-"#;
