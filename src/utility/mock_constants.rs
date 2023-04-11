@@ -215,3 +215,69 @@ pub const BATCH_VALIDATION_NO_ERROR: &str = r#"
     "errors": []
 }
 "#;
+
+pub const BULK_VALIDATION_SUBMIT_OK: &str = r#"
+{
+    "success": true,
+    "message": "File Accepted",
+    "file_name": "emails2.txt",
+    "file_id": "e90e9b1d-8dc7-40eb-a7d9-999d52086a56"
+}
+"#;
+
+pub const BULK_VALIDATION_SUBMIT_ERROR: &str = r#"
+{
+    "success": false,
+    "error_message": "Over 50% of the file you uploaded contains emails in a wrong format, this is usually because you are uploading the wrong file, the file is in the wrong format or wrong column for email has been selected.",
+    "message": "Over 50% of the file you uploaded contains emails in a wrong format, this is usually because you are uploading the wrong file, the file is in the wrong format or wrong column for email has been selected."
+}
+"#;
+
+pub const BULK_VALIDATION_STATUS_OK: &str = r#"
+{
+    "success": true,
+    "file_id": "e90e9b1d-8dc7-40eb-a7d9-999d52086a56",
+    "file_name": "emails2.txt",
+    "upload_date": "2023-04-26T17:52:23Z",
+    "file_status": "Processing",
+    "complete_percentage": "100%",
+    "error_reason": null,
+    "return_url": "https://mock.value.com/"
+}
+"#;
+
+pub const BULK_VALIDATION_STATUS_DELETED: &str = r#"
+{
+    "success": true,
+    "file_id": "e90e9b1d-8dc7-40eb-a7d9-999d52086a56",
+    "file_name": "emails2.txt",
+    "upload_date": "2023-04-26T17:52:23Z",
+    "file_status": "Deleted",
+    "complete_percentage": "0%",
+    "error_reason": "mock value",
+    "return_url": null
+}
+"#;
+
+pub const BULK_VALIDATION_RESULT_DELETED: &str = r#"
+{
+    "success": false,
+    "message": "File deleted."
+}
+"#;
+
+pub const BULK_VALIDATION_DELETE_OK: &str = r#"
+{
+    "success": true,
+    "message": "File Deleted",
+    "file_name": "emails2.txt",
+    "file_id": "e90e9b1d-8dc7-40eb-a7d9-999d52086a56"
+}
+"#;
+
+pub const BULK_VALIDATION_DELETE_NOT_FOUND: &str = r#"
+{
+    "success": false,
+    "message": "File cannot be found."
+}
+"#;

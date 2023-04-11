@@ -1,4 +1,4 @@
-use zero_bounce::utility::{ENDPOINT_ACTIVITY_DATA, ZBError, mock_constants};
+use zero_bounce::utility::{ENDPOINT_ACTIVITY_DATA, CONTENT_TYPE_JSON, ZBError, mock_constants};
 
 use crate::common::EMAIL;
 use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
@@ -41,7 +41,7 @@ fn test_activity_data_bad_request() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_ACTIVITY_DATA))
         .with_status(400)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::INVALID_API_RESPONSE.clone())
         .create();
 
@@ -61,7 +61,7 @@ fn test_activity_data_ok_inactive() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_ACTIVITY_DATA))
         .with_status(200)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::ACTIVITY_DATA_RESPONSE_INACTIVE.clone())
         .create();
 
@@ -82,7 +82,7 @@ fn test_activity_data_ok_active() {
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_ACTIVITY_DATA))
         .with_status(200)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::ACTIVITY_DATA_RESPONSE_ACTIVE.clone())
         .create();
 

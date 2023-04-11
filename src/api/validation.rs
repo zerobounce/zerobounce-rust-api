@@ -5,7 +5,7 @@ use serde_json::from_str;
 use serde_json::{Map as SerdeMap, Value};
 
 use crate::{ZeroBounce,  ZBResult};
-use crate::utility::{ENDPOINT_VALIDATE, ZBError, ENDPOINT_BATCH_VALIDATE};
+use crate::utility::{ENDPOINT_VALIDATE, ZBError, ENDPOINT_BATCH_VALIDATE, CONTENT_TYPE_JSON};
 use crate::utility::structures::validation::{ZBValidation, ZBBatchValidation};
 
 
@@ -22,7 +22,7 @@ impl ZeroBounce {
         }
 
         let response_content = self.generic_get_request(
-            ENDPOINT_VALIDATE, query_args
+            self.url_provider.url_of(ENDPOINT_VALIDATE), query_args
         )?;
 
         let validation = from_str::<ZBValidation>(&response_content)?;
@@ -51,7 +51,7 @@ impl ZeroBounce {
     fn batch_validate_prepare_body(&self, emails_and_ip_addresses: Vec<(String, String)>) -> ZBResult<String> {
         let email_batch = emails_and_ip_addresses
             .into_iter()
-            .map(|(email, ip_address)| 
+            .map(|(email, ip_address)|
                 [
                     ("email_address".to_string(), Value::String(email)),
                     ("ip_address".to_string(), Value::String(ip_address)),
@@ -73,7 +73,7 @@ impl ZeroBounce {
             .map_err(ZBError::JsonError)?;
 
         let final_string = String::from_utf8(serializer.into_inner())
-            .map_err(|error| ZBError::explicit(error.to_string().as_str()))?;
+            .map_err(|error| ZBError::ExplicitError(error.to_string()))?;
 
         Ok(final_string)
     }
@@ -81,17 +81,17 @@ impl ZeroBounce {
     pub fn batch_validate(&self, emails_and_ip_addresses: Vec<(String, String)>) -> ZBResult<ZBBatchValidation> {
         let body_content = self.batch_validate_prepare_body(emails_and_ip_addresses)?;
         let url = self.url_provider.url_of(ENDPOINT_BATCH_VALIDATE);
-        
+
         let response = self.client.post(url)
             .body(body_content)
-            .header("content-type", "application/json")
+            .header("content-type", CONTENT_TYPE_JSON)
             .send()?;
 
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
 
         if !response_ok {
-            return Err(ZBError::explicit(response_content.as_str()));
+            return Err(ZBError::ExplicitError(response_content));
         }
 
         let validation = from_str::<ZBBatchValidation>(response_content.as_str())?;

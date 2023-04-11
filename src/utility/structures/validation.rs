@@ -1,18 +1,9 @@
 use chrono::NaiveDateTime;
-use serde::{Deserialize, de::Error as SerdeError};
 
+use serde::Deserialize;
 
-fn deserialize_naive_date<'de, D>(
-    deserializer: D,
-) -> Result<NaiveDateTime, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let string: &str = serde::Deserialize::deserialize(deserializer)?;
-    let format = "%Y-%m-%d %H:%M:%S.%3f";
-    NaiveDateTime::parse_from_str(string, format)
-        .map_err(SerdeError::custom)
-}
+use crate::utility::structures::custom_deserialize::deserialize_naive_date;
+
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBValidation {

@@ -1,18 +1,20 @@
 [package]
 name = "zero-bounce"
-version = "0.1.2"
+version = "0.1.5"
 edition = "2021"
 description = "Wrapper library over the ZeroBounce API v2"
 homepage = "https://www.zerobounce.net"
 readme = "README.md"
 license-file = "LICENSE"
 repository = "https://github.com/zerobounce/zerobounce-rust-api"
+documentation = "https://docs.rs/zero-bounce"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bytes = "1.4.0"
 chrono = "0.4.24"
-reqwest = { version = "0.11.16", features = ["blocking"] }
+reqwest = { version = "0.11.16", features = ["blocking", "multipart"] }
 serde = { version ="1.0.159", features = ["derive"] }
 serde_json = "1.0.95"
 

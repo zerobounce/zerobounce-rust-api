@@ -1,38 +1,8 @@
 use chrono::NaiveDate;
-use serde::{Deserialize, de::Error as SerdeError};
+use serde::Deserialize;
 
-
-pub(crate) fn deserialize_only_date<'de, D>(
-    deserializer: D,
-) -> Result<NaiveDate, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let string: &str = serde::Deserialize::deserialize(deserializer)?;
-    let format = "%m/%d/%Y";
-    NaiveDate::parse_from_str(string, format)
-        .map_err(SerdeError::custom)
-}
-
-pub(crate) fn deserialize_stringified_uint<'de, D>(
-    deserializer: D,
-) -> Result<Option<u128>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let optional_string: Option<&str> = serde::Deserialize::deserialize(deserializer)?;
-
-    if optional_string == None {
-        return Ok(None);
-    }
-
-    let value: u128 = optional_string
-        .unwrap()
-        .parse::<u128>()
-        .map_err(SerdeError::custom)?;
-
-    Ok(Some(value))
-}
+use crate::utility::structures::custom_deserialize::deserialize_only_date;
+use crate::utility::structures::custom_deserialize::deserialize_stringified_uint;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ApiUsage {
@@ -65,10 +35,10 @@ pub struct ApiUsage {
     pub sub_status_forcible_disconnect: u64,
     pub sub_status_failed_smtp_connection: u64,
     pub sub_status_mx_forward: u64,
-    
+
     #[serde(deserialize_with="deserialize_only_date")]
     pub start_date: NaiveDate,
-    
+
     #[serde(deserialize_with="deserialize_only_date")]
     pub end_date: NaiveDate,
 }
@@ -90,7 +60,9 @@ mod tests {
 
     #[test]
     fn parse_activity_date_without_amount() {
-        let activity_data_res: serde_json::Result<ActivityData> = serde_json::from_str(ACTIVITY_DATA_RESPONSE_INACTIVE);
+        let activity_data_res = serde_json::from_str::<ActivityData>(
+            ACTIVITY_DATA_RESPONSE_INACTIVE
+        );
         assert!(activity_data_res.is_ok(), "error: {}", activity_data_res.unwrap_err());
 
         let activity_data = activity_data_res.unwrap();

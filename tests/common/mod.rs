@@ -1,5 +1,5 @@
 use mockito::{Matcher, ServerGuard, Server};
-use zero_bounce::{ZBUrlProvider, ZeroBounce};
+use zero_bounce::{ZBUrlProvider, ZeroBounce, ZBFile};
 
 pub(crate) const EMAIL: &str = "example@example.com";
 pub(crate) const MOCK_API_KEY: &str = "mock_api_key";
@@ -35,4 +35,15 @@ pub(crate) fn invalid_url_zb_instance() -> ZeroBounce {
             bulk_url: INVALID_URL.to_owned(),
         },
     }
+}
+
+pub(crate) fn generate_zb_file() -> ZBFile {
+    let file_content = String::from("")
+        + "invalid@example.com\n"
+        + "valid@example.com\n"
+        + "toxic@example.com\n"
+        + "donotmail@example.com\n";
+
+    ZBFile::from_content(Vec::from(file_content))
+        .set_has_header_row(false)
 }

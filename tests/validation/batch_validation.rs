@@ -1,4 +1,4 @@
-use zero_bounce::utility::{ENDPOINT_BATCH_VALIDATE, ZBError, mock_constants};
+use zero_bounce::utility::{ENDPOINT_BATCH_VALIDATE, CONTENT_TYPE_JSON, ZBError, mock_constants};
 
 use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
 
@@ -48,7 +48,7 @@ fn test_batch_validation_bad_request() {
 
     let mock = mock_server.mock("POST", endpoint_matcher(ENDPOINT_BATCH_VALIDATE))
         .with_status(400)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::INVALID_API_RESPONSE.clone())
         .create();
 
@@ -69,7 +69,7 @@ fn test_batch_validation_ok() {
 
     let mock = mock_server.mock("POST", endpoint_matcher(ENDPOINT_BATCH_VALIDATE))
         .with_status(200)
-        .with_header("content-type", "application/json")
+        .with_header("content-type", CONTENT_TYPE_JSON)
         .with_body(mock_constants::BATCH_VALIDATION_NO_ERROR.clone())
         .create();
 

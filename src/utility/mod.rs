@@ -1,7 +1,10 @@
+use std::io::Error as IOError;
+
 pub mod structures;
 pub mod mock_constants;
 
-use serde::de::Error as SerdeError;
+pub const CONTENT_TYPE_JSON: &str = "application/json";
+pub const CONTENT_TYPE_STREAM: &str = "application/octet-stream";
 
 pub const URI: &str = "https://api.zerobounce.net/v2";
 pub const BULK_URI: &str = "https://bulkapi.zerobounce.net/v2";
@@ -58,7 +61,8 @@ pub enum ZBError {
     ExplicitError(String),
     JsonError(serde_json::Error),
     IntParseError(std::num::ParseIntError),
-    RequestError(reqwest::Error)
+    RequestError(reqwest::Error),
+    IOError(IOError),
 }
 
 pub type ZBResult<T> = Result<T, ZBError>;
@@ -90,39 +94,8 @@ impl From<serde_json::Error> for ZBError {
     }
 }
 
-
-pub fn deserialize_date_rfc<'de, D>(
-    deserializer: D,
-) -> Result<chrono::DateTime<chrono::FixedOffset>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let string: &str = serde::Deserialize::deserialize(deserializer)?;
-    chrono::DateTime::parse_from_rfc3339(string).map_err(SerdeError::custom)
+impl From<IOError> for ZBError {
+    fn from(value: IOError) -> Self {
+        ZBError::IOError(value)
+    }
 }
-
-
-pub fn parsed_percentage<'de, D>(deserializer: D) -> Result<f32, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let string: &str = serde::Deserialize::deserialize(deserializer)?;
-
-    let raw_error = SerdeError::custom("invalid percentage amount");
-    let first_part = string.split('%').next().ok_or(raw_error)?;
-    first_part
-        .parse::<f32>()
-        .map_err(|error| SerdeError::custom(error.to_string()))
-}
-
-// struct FileStatus {
-//     success: bool,
-//     file_id: String,
-//     file_name: String,
-//     #[serde(deserialize_with="deserialize_date_rfc")]
-//     upload_date: String,
-//     file_status: String,
-//     complete_percentage: f32
-//     error_reason
-//     return_url
-// }
