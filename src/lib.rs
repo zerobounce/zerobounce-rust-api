@@ -16,10 +16,10 @@ pub struct ZBUrlProvider {
 
 impl ZBUrlProvider {
     pub fn url_of(&self, endpoint: &str) -> String {
-        return self.url.to_owned() + endpoint;
+        self.url.to_owned() + endpoint
     }
     pub fn bulk_url_of(&self, endpoint: &str) -> String {
-        return self.bulk_url.to_owned() + endpoint;
+        self.bulk_url.to_owned() + endpoint
     }
 }
 

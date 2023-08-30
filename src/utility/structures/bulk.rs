@@ -100,15 +100,17 @@ impl Default for ZBFile {
 impl ZBFile {
 
     pub fn from_path(path_to_file: String) -> ZBFile {
-        let mut file = ZBFile::default();
-        file.content_type = ZBFileContentType::FilePath(path_to_file);
-        file
+        ZBFile {
+            content_type: ZBFileContentType::FilePath(path_to_file),
+            ..Default::default()
+        }
     }
 
     pub fn from_content(content: Vec<u8>) -> ZBFile {
-        let mut file = ZBFile::default();
-        file.content_type = ZBFileContentType::RawContent(content);
-        file
+        ZBFile {
+            content_type: ZBFileContentType::RawContent(content),
+            ..Default::default()
+        }
     }
 
     fn file_content_multipart(&self) -> ZBResult<Part> {

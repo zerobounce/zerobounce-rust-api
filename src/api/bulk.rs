@@ -79,9 +79,9 @@ impl ZeroBounce {
 
         let response_content = response.text()?;
         if content_type == CONTENT_TYPE_JSON {
-            let feedback = from_str::<ZBFileFeedback>(&response_content);
-            if feedback.is_ok() {
-                return Ok(ZBBulkResponse::Feedback(feedback.unwrap()));
+            let feedback_res = from_str::<ZBFileFeedback>(&response_content);
+            if let Ok(file_feedback) = feedback_res {
+                return Ok(ZBBulkResponse::Feedback(file_feedback));
             }
         }
 

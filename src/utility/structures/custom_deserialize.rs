@@ -36,7 +36,7 @@ where
 {
     let optional_string: Option<&str> = serde::Deserialize::deserialize(deserializer)?;
 
-    if optional_string == None {
+    if optional_string.is_none() {
         return Ok(None);
     }
 

@@ -17,7 +17,7 @@ impl ZeroBounce {
             ("email", email),
         ]);
 
-        if ip_address.len() != 0 {
+        if ip_address.is_empty() {
             query_args.insert("ip_address", ip_address);
         }
 
@@ -30,7 +30,7 @@ impl ZeroBounce {
     }
 
     pub fn validate_email(&self, email: &str) -> ZBResult<ZBValidation> {
-        return self.validate_email_and_ip(email, "");
+        self.validate_email_and_ip(email, "")
     }
 
     // Represent a list of tuples (containing email and ip_address) into a
