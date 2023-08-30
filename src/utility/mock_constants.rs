@@ -281,3 +281,37 @@ pub const BULK_VALIDATION_DELETE_NOT_FOUND: &str = r#"
     "message": "File cannot be found."
 }
 "#;
+
+pub const MOCK_FIND_MAIL_INVALID: &str = r#"{
+    "email": "",
+    "domain": "example.in",
+    "format": "unknown",
+    "status": "invalid",
+    "sub_status": "no_dns_entries",
+    "confidence": "undetermined",
+    "did_you_mean": "",
+    "failure_reason": "",
+    "other_domain_formats": []
+}"#;
+
+pub const MOCK_FIND_MAIL_VALID: &str = r#"{
+    "email": "john.doe@example.com",
+    "domain": "example.com",
+    "format": "first.last",
+    "status": "valid",
+    "sub_status": "",
+    "confidence": "high",
+    "did_you_mean": "",
+    "failure_reason": "",
+    "other_domain_formats": [
+        {
+            "format": "first_last",
+            "confidence": "high"
+        },
+        {
+            "format": "first",
+            "confidence": "medium"
+        }
+    ]
+}"#;
+

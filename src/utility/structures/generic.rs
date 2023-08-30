@@ -51,12 +51,34 @@ pub struct ActivityData {
     pub active_in_days: Option<u128>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct DomainFormats {
+    pub format: String,
+    pub confidence: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct FindEmailResponse {
+    pub email: String,
+    pub domain: String,
+    pub format: String,
+    pub status: String,
+    pub sub_status: String,
+    pub confidence: String,
+    pub did_you_mean: String,
+    pub failure_reason: String,
+    pub other_domain_formats: Vec<DomainFormats>,
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::utility::mock_constants::API_USAGE_RESPONSE;
     use crate::utility::mock_constants::ACTIVITY_DATA_RESPONSE_ACTIVE;
     use crate::utility::mock_constants::ACTIVITY_DATA_RESPONSE_INACTIVE;
+    use crate::utility::mock_constants::MOCK_FIND_MAIL_INVALID;
+    use crate::utility::mock_constants::MOCK_FIND_MAIL_VALID;
 
     #[test]
     fn parse_activity_date_without_amount() {
@@ -91,4 +113,28 @@ mod tests {
         assert_eq!(api_usage_obj.start_date, expected_start_date);
         assert_eq!(api_usage_obj.end_date, expected_end_date);
     }
+
+    #[test]
+    fn parse_find_mail_invalid_status() {
+        let find_mail: serde_json::Result<FindEmailResponse> = serde_json::from_str(MOCK_FIND_MAIL_INVALID);
+        assert!(find_mail.is_ok());
+
+        let find_mail_object = find_mail.unwrap();
+        assert_eq!(find_mail_object.email, "");
+        assert_eq!(find_mail_object.other_domain_formats.len(), 0);
+    }
+
+    #[test]
+    fn parse_find_mail_valid_status() {
+        let find_mail: serde_json::Result<FindEmailResponse> = serde_json::from_str(MOCK_FIND_MAIL_VALID);
+        assert!(find_mail.is_ok());
+
+        let find_mail_object = find_mail.unwrap();
+        assert_eq!(find_mail_object.email, "john.doe@example.com");
+        assert_eq!(find_mail_object.other_domain_formats.len(), 2);
+        assert_eq!(find_mail_object.other_domain_formats[0].confidence, "high");
+        assert_eq!(find_mail_object.other_domain_formats[1].confidence, "medium");
+    }
+
+
 }

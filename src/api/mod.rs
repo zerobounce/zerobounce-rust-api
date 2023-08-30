@@ -7,7 +7,8 @@ use chrono::{NaiveDate, Utc};
 use serde_json::from_str;
 
 pub use crate::ZeroBounce;
-use crate::utility::{ZBError, ZBResult};
+use crate::utility::structures::generic::FindEmailResponse;
+use crate::utility::{ZBError, ZBResult, ENDPOINT_EMAIL_FINDER};
 use crate::utility::structures::{ActivityData, ApiUsage};
 use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS};
 
@@ -69,6 +70,33 @@ impl ZeroBounce {
 
         let activity_data = from_str::<ActivityData>(&response_content)?;
         Ok(activity_data)
+    }
+
+    pub fn find_email(&self, domain: &str, first_name: &str, middle_name: &str, last_name: &str) -> ZBResult<FindEmailResponse> {
+        let mut query_args = HashMap::from([
+            ("api_key", self.api_key.as_str()),
+            ("domain", domain),
+        ]);
+        if !first_name.is_empty() {
+            query_args.insert("first_name", first_name);
+        }
+        if !middle_name.is_empty() {
+            query_args.insert("middle_name", middle_name);
+        }
+        if !last_name.is_empty() {
+            query_args.insert("last_name", last_name);
+        }
+
+        let response_content = self.generic_get_request(
+            self.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
+        )?;
+
+        let activity_data = from_str::<FindEmailResponse>(&response_content)?;
+        Ok(activity_data)
+    }
+
+    pub fn domain_search(&self, domain: &str) -> ZBResult<FindEmailResponse> {
+        self.find_email(domain, "", "", "")
     }
 
 }
