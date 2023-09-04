@@ -21,6 +21,7 @@ pub const ENDPOINT_SCORING_SEND: &str = "/scoring/sendfile";
 pub const ENDPOINT_SCORING_STATUS: &str = "/scoring/filestatus";
 pub const ENDPOINT_SCORING_RESULT: &str = "/scoring/getfile";
 pub const ENDPOINT_SCORING_DELETE: &str = "/scoring/deletefile";
+pub const ENDPOINT_EMAIL_FINDER: &str = "/guessformat";
 
 // validation statuses
 pub const S_VALID: &str = "valid";
