@@ -33,7 +33,6 @@ impl ZeroBounce {
 
     fn generic_file_status_check(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileStatus> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
         ]);
 
@@ -47,7 +46,6 @@ impl ZeroBounce {
 
     fn generic_result_fetch(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBBulkResponse> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
         ]);
 
@@ -97,7 +95,6 @@ impl ZeroBounce {
 
     fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback>{
         let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
         ]);
 

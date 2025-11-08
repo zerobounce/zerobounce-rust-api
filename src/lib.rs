@@ -51,7 +51,10 @@ impl ZeroBounce {
         }
     }
 
-    fn generic_get_request(&self,url: String,query_args: HashMap<&str, &str>,) -> ZBResult<String> {
+    fn generic_get_request<'a>(&'a self, url: String, mut query_args: HashMap<&'a str, &'a str>) -> ZBResult<String> {
+        // Automatically add api_key to query arguments
+        query_args.insert("api_key", self.api_key.as_str());
+        
         let response = self.client.get(url).query(&query_args).send()?;
 
         let response_ok = response.status().is_success();

@@ -1,10 +1,16 @@
+use std::env;
 use zero_bounce::ZeroBounce;
 use zero_bounce::utility::ZBResult;
 
-const ZERO_BOUNCE_API_KEY: &str = "YOUR API KEY";
-
 fn main() -> ZBResult<()> {
-    let domain_search = ZeroBounce::new(ZERO_BOUNCE_API_KEY)
+    // Load environment variables from .env file
+    dotenv::dotenv().ok();
+    
+    // Get API key from environment variable
+    let api_key = env::var("ZERO_BOUNCE_API_KEY")
+        .expect("ZERO_BOUNCE_API_KEY must be set in .env file");
+    
+    let domain_search = ZeroBounce::new(&api_key)
         .domain_search("example.com")?;
 
     println!("Response: {:#?}", domain_search);

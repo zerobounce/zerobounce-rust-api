@@ -15,15 +15,19 @@ use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDIT
 /// Builder for the `find_email_v2` API call.
 /// 
 /// # Example
-/// ```
+/// ```no_run
 /// use zero_bounce::ZeroBounce;
+/// use zero_bounce::utility::ZBResult;
 /// 
+/// # fn main() -> ZBResult<()> {
 /// let zb = ZeroBounce::new("your_api_key");
 /// let result = zb.find_email_v2()
 ///     .first_name("John")
 ///     .domain("example.com")
 ///     .last_name("Doe")
 ///     .call()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct FindEmailV2Builder<'a> {
     client: &'a ZeroBounce,
@@ -37,13 +41,17 @@ pub struct FindEmailV2Builder<'a> {
 /// Builder for the `domain_search_v2` API call.
 /// 
 /// # Example
-/// ```
+/// ```no_run
 /// use zero_bounce::ZeroBounce;
+/// use zero_bounce::utility::ZBResult;
 /// 
+/// # fn main() -> ZBResult<()> {
 /// let zb = ZeroBounce::new("your_api_key");
 /// let result = zb.domain_search_v2()
 ///     .domain("example.com")
 ///     .call()?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct DomainSearchV2Builder<'a> {
     client: &'a ZeroBounce,
@@ -63,9 +71,7 @@ impl ZeroBounce {
     }
 
     pub fn get_credits(&self) -> ZBResult<i64> {
-        let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
-        ]);
+        let query_args = HashMap::new();
 
         let response_content = self.generic_get_request(
             self.url_provider.url_of(ENDPOINT_CREDITS), query_args
@@ -78,7 +84,6 @@ impl ZeroBounce {
         let start_date_str = start_date.format("%F").to_string();
         let end_date_str = end_date.format("%F").to_string();
         let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("start_date", start_date_str.as_str()),
             ("end_date", end_date_str.as_str()),
         ]);
@@ -99,7 +104,6 @@ impl ZeroBounce {
 
     pub fn get_activity_data(&self, email: &str) -> ZBResult<ActivityData> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("email", email),
         ]);
 
@@ -120,7 +124,6 @@ impl ZeroBounce {
     )]
     pub fn find_email(&self, domain: &str, first_name: &str, middle_name: &str, last_name: &str) -> ZBResult<FindEmailResponse> {
         let mut query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("domain", domain),
         ]);
         if !first_name.is_empty() {
@@ -150,9 +153,11 @@ impl ZeroBounce {
     /// - Exactly one of `domain` or `company_name` must be provided (XOR requirement)
     /// 
     /// # Example
-    /// ```
+    /// ```no_run
     /// use zero_bounce::ZeroBounce;
+    /// use zero_bounce::utility::ZBResult;
     /// 
+    /// # fn main() -> ZBResult<()> {
     /// let zb = ZeroBounce::new("your_api_key");
     /// // Using domain
     /// let result = zb.find_email_v2()
@@ -166,6 +171,8 @@ impl ZeroBounce {
     ///     .company_name("Example Inc")
     ///     .last_name("Doe")
     ///     .call()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn find_email_v2(&self) -> FindEmailV2Builder<'_> {
         FindEmailV2Builder {
@@ -197,9 +204,11 @@ impl ZeroBounce {
     /// Exactly one of `domain` or `company_name` must be provided (XOR requirement).
     /// 
     /// # Example
-    /// ```
+    /// ```no_run
     /// use zero_bounce::ZeroBounce;
+    /// use zero_bounce::utility::ZBResult;
     /// 
+    /// # fn main() -> ZBResult<()> {
     /// let zb = ZeroBounce::new("your_api_key");
     /// // Using domain
     /// let result = zb.domain_search_v2()
@@ -209,6 +218,8 @@ impl ZeroBounce {
     /// let result = zb.domain_search_v2()
     ///     .company_name("Example Inc")
     ///     .call()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn domain_search_v2(&self) -> DomainSearchV2Builder<'_> {
         DomainSearchV2Builder {
@@ -280,7 +291,6 @@ impl<'a> FindEmailV2Builder<'a> {
         }
 
         let mut query_args = HashMap::from([
-            ("api_key", self.client.api_key.as_str()),
             ("first_name", first_name),
         ]);
 
@@ -354,9 +364,7 @@ impl<'a> DomainSearchV2Builder<'a> {
             }
         }
 
-        let mut query_args = HashMap::from([
-            ("api_key", self.client.api_key.as_str()),
-        ]);
+        let mut query_args = HashMap::new();
 
         if let Some(d) = self.domain {
             query_args.insert("domain", d);
