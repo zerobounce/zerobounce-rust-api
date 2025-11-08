@@ -43,7 +43,7 @@ fn test_api_usage_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_API_USAGE))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let api_usage = zb_instance.get_api_usage_overall();
@@ -63,7 +63,7 @@ fn test_api_usage_ok() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_API_USAGE))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::API_USAGE_RESPONSE.clone())
+        .with_body(mock_constants::API_USAGE_RESPONSE)
         .create();
 
     // start_date, end_date will not match the response, as the API should

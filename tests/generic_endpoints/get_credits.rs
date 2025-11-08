@@ -41,7 +41,7 @@ fn test_credits_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_CREDITS))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let credits = zb_instance.get_credits();
@@ -61,7 +61,7 @@ fn test_credits_negative_response() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_CREDITS))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::CREDITS_RESPONSE_NEGATIVE.clone())
+        .with_body(mock_constants::CREDITS_RESPONSE_NEGATIVE)
         .create();
 
     let credits = zb_instance.get_credits();
@@ -79,7 +79,7 @@ fn test_credits_ok() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_CREDITS))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::CREDITS_RESPONSE_OK.clone())
+        .with_body(mock_constants::CREDITS_RESPONSE_OK)
         .create();
 
     let credits = zb_instance.get_credits();

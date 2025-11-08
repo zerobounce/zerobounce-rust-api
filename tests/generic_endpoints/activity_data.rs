@@ -42,7 +42,7 @@ fn test_activity_data_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_ACTIVITY_DATA))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let activity_data = zb_instance.get_activity_data(EMAIL);
@@ -62,7 +62,7 @@ fn test_activity_data_ok_inactive() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_ACTIVITY_DATA))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::ACTIVITY_DATA_RESPONSE_INACTIVE.clone())
+        .with_body(mock_constants::ACTIVITY_DATA_RESPONSE_INACTIVE)
         .create();
 
     // start_date, end_date will not match the response, as the API should
@@ -83,7 +83,7 @@ fn test_activity_data_ok_active() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_ACTIVITY_DATA))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::ACTIVITY_DATA_RESPONSE_ACTIVE.clone())
+        .with_body(mock_constants::ACTIVITY_DATA_RESPONSE_ACTIVE)
         .create();
 
     // start_date, end_date will not match the response, as the API should

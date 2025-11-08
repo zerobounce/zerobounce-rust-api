@@ -26,8 +26,8 @@ impl ZBUrlProvider {
 impl Default for ZBUrlProvider {
     fn default() -> Self {
         ZBUrlProvider {
-            url: crate::utility::URI.clone().to_string(),
-            bulk_url: crate::utility::BULK_URI.clone().to_string(),
+            url: crate::utility::URI.to_string(),
+            bulk_url: crate::utility::BULK_URI.to_string(),
         }
     }
 }

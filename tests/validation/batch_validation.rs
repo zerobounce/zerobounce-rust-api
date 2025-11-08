@@ -49,7 +49,7 @@ fn test_batch_validation_bad_request() {
     let mock = mock_server.mock("POST", endpoint_matcher(ENDPOINT_BATCH_VALIDATE))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let emails_and_ip_addresses = emails_and_ips();
@@ -70,7 +70,7 @@ fn test_batch_validation_ok() {
     let mock = mock_server.mock("POST", endpoint_matcher(ENDPOINT_BATCH_VALIDATE))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::BATCH_VALIDATION_NO_ERROR.clone())
+        .with_body(mock_constants::BATCH_VALIDATION_NO_ERROR)
         .create();
 
     // start_date, end_date will not match the response, as the API should

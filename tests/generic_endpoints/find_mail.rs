@@ -46,7 +46,7 @@ fn test_find_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_EMAIL_FINDER))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let find_mail_res = zb_instance.find_email(
@@ -68,7 +68,7 @@ fn test_find_invalid_status_payload() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_EMAIL_FINDER))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::MOCK_FIND_MAIL_INVALID.clone())
+        .with_body(mock_constants::MOCK_FIND_MAIL_INVALID)
         .create();
 
     let find_mail_res = zb_instance.find_email(
@@ -91,7 +91,7 @@ fn test_find_valid_status_payload() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_EMAIL_FINDER))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::MOCK_FIND_MAIL_VALID.clone())
+        .with_body(mock_constants::MOCK_FIND_MAIL_VALID)
         .create();
 
     let find_mail_res = zb_instance.find_email(
@@ -150,7 +150,7 @@ fn test_domain_search_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_EMAIL_FINDER))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let domain_search_res = zb_instance.domain_search("example.com");
@@ -170,7 +170,7 @@ fn test_domain_search_invalid_status_payload() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_EMAIL_FINDER))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::MOCK_FIND_MAIL_INVALID.clone())
+        .with_body(mock_constants::MOCK_FIND_MAIL_INVALID)
         .create();
 
     let domain_search_res = zb_instance.domain_search("example.com");
@@ -191,7 +191,7 @@ fn test_domain_search_valid_status_payload() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_EMAIL_FINDER))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::MOCK_FIND_MAIL_VALID.clone())
+        .with_body(mock_constants::MOCK_FIND_MAIL_VALID)
         .create();
 
     let domain_search_obj = zb_instance.domain_search("example.com");

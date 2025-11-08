@@ -17,7 +17,7 @@ impl ZeroBounce {
             ("email", email),
         ]);
 
-        if ip_address.is_empty() {
+        if !ip_address.is_empty() {
             query_args.insert("ip_address", ip_address);
         }
 

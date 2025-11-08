@@ -41,7 +41,7 @@ fn test_simple_validation_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_VALIDATE))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let validation = zb_instance.validate_email(EMAIL);
@@ -61,7 +61,7 @@ fn test_simple_validation_ok() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_VALIDATE))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::VALIDATION_RESPONSE_VALID.clone())
+        .with_body(mock_constants::VALIDATION_RESPONSE_VALID)
         .match_query(mockito::Matcher::UrlEncoded("email".to_string(), EMAIL.to_string()))
         .create();
 
@@ -78,7 +78,7 @@ fn test_simple_validation_with_ip_ok() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_VALIDATE))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::VALIDATION_RESPONSE_VALID.clone())
+        .with_body(mock_constants::VALIDATION_RESPONSE_VALID)
         .match_query(mockito::Matcher::UrlEncoded("email".to_string(), EMAIL.to_string()))
         .match_query(mockito::Matcher::UrlEncoded(
             "ip_address".to_string(), SANDBOX_IP.to_string()
