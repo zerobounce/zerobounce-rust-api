@@ -315,3 +315,30 @@ pub const MOCK_FIND_MAIL_VALID: &str = r#"{
     ]
 }"#;
 
+pub const MOCK_FIND_EMAIL_V2_DOMAIN_VALID: &str = r#"{
+    "email": "john.doe@example.com",
+    "email_confidence": "high",
+    "domain": "",
+    "company_name": "Internet Assigned Numbers Authority",
+    "did_you_mean": "",
+    "failure_reason": ""
+}"#;
+
+pub const MOCK_FIND_EMAIL_V2_COMPANY_VALID: &str = r#"{
+    "email": "john.doe@example.com",
+    "email_confidence": "high",
+    "domain": "betheexample.org",
+    "company_name": "Example Inc",
+    "did_you_mean": "",
+    "failure_reason": ""
+}"#;
+
+pub const MOCK_FIND_EMAIL_V2_INVALID: &str = r#"{
+    "email": "",
+    "email_confidence": "undetermined",
+    "domain": "betheexample.org",
+    "company_name": "Example Inc",
+    "did_you_mean": "",
+    "failure_reason": ""
+}"#;
+

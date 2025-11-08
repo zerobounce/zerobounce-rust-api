@@ -7,7 +7,7 @@ use chrono::{NaiveDate, Utc};
 use serde_json::from_str;
 
 pub use crate::ZeroBounce;
-use crate::utility::structures::generic::FindEmailResponse;
+use crate::utility::structures::generic::{FindEmailResponse, FindEmailResponseV2};
 use crate::utility::{ZBError, ZBResult, ENDPOINT_EMAIL_FINDER};
 use crate::utility::structures::{ActivityData, ApiUsage};
 use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS};
@@ -72,6 +72,13 @@ impl ZeroBounce {
         Ok(activity_data)
     }
 
+    /// Deprecated: Use `find_email_v2` instead.
+    /// 
+    /// This function is kept for backward compatibility but will be removed in a future version.
+    #[deprecated(
+        since = "1.2.0",
+        note = "Use `find_email_v2` instead. The new version supports both domain and company_name parameters."
+    )]
     pub fn find_email(&self, domain: &str, first_name: &str, middle_name: &str, last_name: &str) -> ZBResult<FindEmailResponse> {
         let mut query_args = HashMap::from([
             ("api_key", self.api_key.as_str()),
@@ -93,6 +100,98 @@ impl ZeroBounce {
 
         let activity_data = from_str::<FindEmailResponse>(&response_content)?;
         Ok(activity_data)
+    }
+
+    /// Find an email address using either a domain or company name.
+    /// 
+    /// # Parameters
+    /// - `first_name`: Mandatory first name
+    /// - `domain`: Optional domain name (e.g., "example.com")
+    /// - `company_name`: Optional company name (e.g., "Example Inc")
+    /// - `middle_name`: Optional middle name
+    /// - `last_name`: Optional last name
+    /// 
+    /// # Requirements
+    /// Exactly one of `domain` or `company_name` must be provided (XOR requirement).
+    /// 
+    /// # Example
+    /// ```
+    /// use zero_bounce::ZeroBounce;
+    /// 
+    /// let zb = ZeroBounce::new("your_api_key");
+    /// // Using domain
+    /// let result = zb.find_email_v2("John", Some("example.com"), None, None, Some("Doe"));
+    /// // Or using company name
+    /// let result = zb.find_email_v2("John", None, Some("Example Inc"), None, Some("Doe"));
+    /// ```
+    pub fn find_email_v2(
+        &self,
+        first_name: &str,
+        domain: Option<&str>,
+        company_name: Option<&str>,
+        middle_name: Option<&str>,
+        last_name: Option<&str>,
+    ) -> ZBResult<FindEmailResponseV2> {
+        if first_name.is_empty() {
+            return Err(ZBError::explicit("first_name is mandatory and cannot be empty"));
+        }
+
+        match (domain, company_name) {
+            (Some(d), None) => {
+                if d.is_empty() {
+                    return Err(ZBError::explicit("domain cannot be empty"));
+                }
+            }
+            (None, Some(c)) => {
+                if c.is_empty() {
+                    return Err(ZBError::explicit("company_name cannot be empty"));
+                }
+            }
+            (Some(_), Some(_)) => {
+                return Err(ZBError::explicit("exactly one of domain or company_name must be provided, not both"));
+            }
+            (None, None) => {
+                return Err(ZBError::explicit("either domain or company_name must be provided"));
+            }
+        }
+
+        let mut query_args = HashMap::from([
+            ("api_key", self.api_key.as_str()),
+            ("first_name", first_name),
+        ]);
+
+        if let Some(d) = domain {
+            query_args.insert("domain", d);
+        }
+
+        if let Some(c) = company_name {
+            query_args.insert("company_name", c);
+        }
+
+        if let Some(middle) = middle_name {
+            if !middle.is_empty() {
+                query_args.insert("middle_name", middle);
+            }
+        }
+
+        if let Some(last) = last_name {
+            if !last.is_empty() {
+                query_args.insert("last_name", last);
+            }
+        }
+
+        let response_content = self.generic_get_request(
+            self.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
+        )?;
+
+        // Debug: Print raw response to examine structure in debug mode
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Raw API response: {}", response_content);
+        }
+
+        let find_email_response = from_str::<FindEmailResponseV2>(&response_content)?;
+        Ok(find_email_response)
     }
 
     pub fn domain_search(&self, domain: &str) -> ZBResult<FindEmailResponse> {

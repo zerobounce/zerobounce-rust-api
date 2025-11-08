@@ -70,6 +70,24 @@ pub struct FindEmailResponse {
     pub other_domain_formats: Vec<DomainFormats>,
 }
 
+/// Response structure for the new find_email_v2 API endpoint.
+/// This structure matches the new API response format which includes
+/// `email_confidence` and `company_name` fields.
+#[derive(Clone, Debug, Deserialize)]
+pub struct FindEmailResponseV2 {
+    pub email: String,
+    #[serde(default)]
+    pub domain: String,
+    #[serde(rename = "email_confidence", default)]
+    pub confidence: String,
+    #[serde(default)]
+    pub company_name: String,
+    #[serde(default)]
+    pub did_you_mean: String,
+    #[serde(default)]
+    pub failure_reason: String,
+}
+
 
 #[cfg(test)]
 mod tests {
