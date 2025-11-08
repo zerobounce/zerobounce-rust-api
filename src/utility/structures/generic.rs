@@ -88,6 +88,27 @@ pub struct FindEmailResponseV2 {
     pub failure_reason: String,
 }
 
+/// Response structure for the new domain_search_v2 API endpoint.
+/// This structure matches the domain search API response format which includes
+/// `format`, `confidence`, and `other_domain_formats` fields.
+#[derive(Clone, Debug, Deserialize)]
+pub struct DomainSearchResponseV2 {
+    #[serde(default)]
+    pub domain: String,
+    #[serde(default)]
+    pub company_name: String,
+    #[serde(default)]
+    pub format: String,
+    #[serde(default)]
+    pub confidence: String,
+    #[serde(default)]
+    pub did_you_mean: String,
+    #[serde(default)]
+    pub failure_reason: String,
+    #[serde(default)]
+    pub other_domain_formats: Vec<DomainFormats>,
+}
+
 
 #[cfg(test)]
 mod tests {

@@ -3,5 +3,5 @@ pub mod custom_deserialize;
 pub mod generic;
 pub mod validation;
 
-pub use generic::{ActivityData, ApiUsage, FindEmailResponse, FindEmailResponseV2};
+pub use generic::{ActivityData, ApiUsage, FindEmailResponse, FindEmailResponseV2, DomainSearchResponseV2};
 

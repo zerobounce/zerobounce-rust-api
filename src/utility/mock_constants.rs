@@ -342,3 +342,42 @@ pub const MOCK_FIND_EMAIL_V2_INVALID: &str = r#"{
     "failure_reason": ""
 }"#;
 
+pub const MOCK_DOMAIN_SEARCH_V2_DOMAIN: &str = r#"{
+    "domain": "example.com",
+    "company_name": "",
+    "format": "unknown",
+    "confidence": "undetermined",
+    "did_you_mean": "",
+    "failure_reason": "",
+    "other_domain_formats": []
+}"#;
+
+pub const MOCK_DOMAIN_SEARCH_V2_COMPANY: &str = r#"{
+    "domain": "betheexample.org",
+    "company_name": "Example Inc",
+    "format": "unknown",
+    "confidence": "undetermined",
+    "did_you_mean": "",
+    "failure_reason": "",
+    "other_domain_formats": []
+}"#;
+
+pub const MOCK_DOMAIN_SEARCH_V2_WITH_FORMATS: &str = r#"{
+    "domain": "example.com",
+    "company_name": "",
+    "format": "first.last",
+    "confidence": "high",
+    "did_you_mean": "",
+    "failure_reason": "",
+    "other_domain_formats": [
+        {
+            "format": "first_last",
+            "confidence": "high"
+        },
+        {
+            "format": "first",
+            "confidence": "medium"
+        }
+    ]
+}"#;
+
