@@ -120,18 +120,22 @@ impl ZeroBounce {
     /// 
     /// let zb = ZeroBounce::new("your_api_key");
     /// // Using domain
-    /// let result = zb.find_email_v2("John", Some("example.com"), None, None, Some("Doe"));
+    /// let result = zb.find_email_v2("John", "example.com", None, None, "Doe");
     /// // Or using company name
-    /// let result = zb.find_email_v2("John", None, Some("Example Inc"), None, Some("Doe"));
+    /// let result = zb.find_email_v2("John", None, "Example Inc", None, "Doe");
     /// ```
-    pub fn find_email_v2(
+    pub fn find_email_v2<'a>(
         &self,
         first_name: &str,
-        domain: Option<&str>,
-        company_name: Option<&str>,
-        middle_name: Option<&str>,
-        last_name: Option<&str>,
+        domain: impl Into<Option<&'a str>>,
+        company_name: impl Into<Option<&'a str>>,
+        middle_name: impl Into<Option<&'a str>>,
+        last_name: impl Into<Option<&'a str>>,
     ) -> ZBResult<FindEmailResponseV2> {
+        let domain = domain.into();
+        let company_name = company_name.into();
+        let middle_name = middle_name.into();
+        let last_name = last_name.into();
         if first_name.is_empty() {
             return Err(ZBError::explicit("first_name is mandatory and cannot be empty"));
         }
@@ -220,15 +224,17 @@ impl ZeroBounce {
     /// 
     /// let zb = ZeroBounce::new("your_api_key");
     /// // Using domain
-    /// let result = zb.domain_search_v2(Some("example.com"), None);
+    /// let result = zb.domain_search_v2("example.com", None);
     /// // Or using company name
-    /// let result = zb.domain_search_v2(None, Some("Example Inc"));
+    /// let result = zb.domain_search_v2(None, "Example Inc");
     /// ```
-    pub fn domain_search_v2(
+    pub fn domain_search_v2<'a>(
         &self,
-        domain: Option<&str>,
-        company_name: Option<&str>,
+        domain: impl Into<Option<&'a str>>,
+        company_name: impl Into<Option<&'a str>>,
     ) -> ZBResult<DomainSearchResponseV2> {
+        let domain = domain.into();
+        let company_name = company_name.into();
         match (domain, company_name) {
             (Some(d), None) => {
                 if d.is_empty() {
