@@ -6,7 +6,10 @@ use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
 fn test_find_email_v2_empty_first_name() {
     let (mut _mock_server, zb_instance) = instantiate();
     
-    let result = zb_instance.find_email_v2("", "example.com", None, None, None);
+    let result = zb_instance.find_email_v2()
+        .first_name("")
+        .domain("example.com")
+        .call();
     assert!(result.is_err());
     
     let zb_error = result.unwrap_err();
@@ -20,7 +23,11 @@ fn test_find_email_v2_empty_first_name() {
 fn test_find_email_v2_both_domain_and_company() {
     let (mut _mock_server, zb_instance) = instantiate();
     
-    let result = zb_instance.find_email_v2("John", "example.com", "Example Inc", None, None);
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .domain("example.com")
+        .company_name("Example Inc")
+        .call();
     assert!(result.is_err());
     
     let zb_error = result.unwrap_err();
@@ -34,7 +41,9 @@ fn test_find_email_v2_both_domain_and_company() {
 fn test_find_email_v2_neither_domain_nor_company() {
     let (mut _mock_server, zb_instance) = instantiate();
     
-    let result = zb_instance.find_email_v2("John", None, None, None, None);
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .call();
     assert!(result.is_err());
     
     let zb_error = result.unwrap_err();
@@ -48,7 +57,10 @@ fn test_find_email_v2_neither_domain_nor_company() {
 fn test_find_email_v2_empty_domain() {
     let (mut _mock_server, zb_instance) = instantiate();
     
-    let result = zb_instance.find_email_v2("John", "", None, None, None);
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .domain("")
+        .call();
     assert!(result.is_err());
     
     let zb_error = result.unwrap_err();
@@ -62,7 +74,10 @@ fn test_find_email_v2_empty_domain() {
 fn test_find_email_v2_empty_company_name() {
     let (mut _mock_server, zb_instance) = instantiate();
     
-    let result = zb_instance.find_email_v2("John", None, "", None, None);
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .company_name("")
+        .call();
     assert!(result.is_err());
     
     let zb_error = result.unwrap_err();
@@ -75,7 +90,11 @@ fn test_find_email_v2_empty_company_name() {
 #[test]
 fn test_find_email_v2_client_error() {
     let zb_instance = invalid_url_zb_instance();
-    let result = zb_instance.find_email_v2("John", "example.com", None, None, "Doe");
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .domain("example.com")
+        .last_name("Doe")
+        .call();
     assert!(result.is_err());
 
     let zb_error = result.unwrap_err();
@@ -93,7 +112,11 @@ fn test_find_email_v2_invalid_json() {
         .with_body("")
         .create();
 
-    let result = zb_instance.find_email_v2("John", "example.com", None, None, "Doe");
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .domain("example.com")
+        .last_name("Doe")
+        .call();
     assert!(result.is_err());
     mock.assert();
 
@@ -117,7 +140,11 @@ fn test_find_email_v2_bad_request() {
         .match_query(mockito::Matcher::UrlEncoded("last_name".to_string(), "Doe".to_string()))
         .create();
 
-    let result = zb_instance.find_email_v2("John", "example.com", None, None, "Doe");
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .domain("example.com")
+        .last_name("Doe")
+        .call();
     assert!(result.is_err());
     mock.assert();
 
@@ -141,7 +168,11 @@ fn test_find_email_v2_with_domain_ok() {
         .match_query(mockito::Matcher::UrlEncoded("last_name".to_string(), "Doe".to_string()))
         .create();
 
-    let result = zb_instance.find_email_v2("John", "example.com", None, None, "Doe");
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .domain("example.com")
+        .last_name("Doe")
+        .call();
     assert!(result.is_ok());
     mock.assert();
 
@@ -165,7 +196,11 @@ fn test_find_email_v2_with_company_name_ok() {
         .match_query(mockito::Matcher::UrlEncoded("last_name".to_string(), "Doe".to_string()))
         .create();
 
-    let result = zb_instance.find_email_v2("John", None, "Example Inc", None, "Doe");
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .company_name("Example Inc")
+        .last_name("Doe")
+        .call();
     assert!(result.is_ok());
     mock.assert();
 
@@ -191,7 +226,12 @@ fn test_find_email_v2_with_middle_name() {
         .match_query(mockito::Matcher::UrlEncoded("last_name".to_string(), "Doe".to_string()))
         .create();
 
-    let result = zb_instance.find_email_v2("John", "example.com", None, "Middle", "Doe");
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .domain("example.com")
+        .middle_name("Middle")
+        .last_name("Doe")
+        .call();
     assert!(result.is_ok());
     mock.assert();
 
@@ -213,7 +253,10 @@ fn test_find_email_v2_invalid_response() {
         .match_query(mockito::Matcher::UrlEncoded("company_name".to_string(), "Example Inc".to_string()))
         .create();
 
-    let result = zb_instance.find_email_v2("John", None, "Example Inc", None, None);
+    let result = zb_instance.find_email_v2()
+        .first_name("John")
+        .company_name("Example Inc")
+        .call();
     assert!(result.is_ok());
     mock.assert();
 

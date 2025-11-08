@@ -12,6 +12,45 @@ use crate::utility::{ZBError, ZBResult, ENDPOINT_EMAIL_FINDER};
 use crate::utility::structures::{ActivityData, ApiUsage};
 use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS};
 
+/// Builder for the `find_email_v2` API call.
+/// 
+/// # Example
+/// ```
+/// use zero_bounce::ZeroBounce;
+/// 
+/// let zb = ZeroBounce::new("your_api_key");
+/// let result = zb.find_email_v2()
+///     .first_name("John")
+///     .domain("example.com")
+///     .last_name("Doe")
+///     .call()?;
+/// ```
+pub struct FindEmailV2Builder<'a> {
+    client: &'a ZeroBounce,
+    first_name: Option<&'a str>,
+    domain: Option<&'a str>,
+    company_name: Option<&'a str>,
+    middle_name: Option<&'a str>,
+    last_name: Option<&'a str>,
+}
+
+/// Builder for the `domain_search_v2` API call.
+/// 
+/// # Example
+/// ```
+/// use zero_bounce::ZeroBounce;
+/// 
+/// let zb = ZeroBounce::new("your_api_key");
+/// let result = zb.domain_search_v2()
+///     .domain("example.com")
+///     .call()?;
+/// ```
+pub struct DomainSearchV2Builder<'a> {
+    client: &'a ZeroBounce,
+    domain: Option<&'a str>,
+    company_name: Option<&'a str>,
+}
+
 impl ZeroBounce {
 
     fn get_credits_from_string(string_value: String) -> ZBResult<i64> {
@@ -104,15 +143,11 @@ impl ZeroBounce {
 
     /// Find an email address using either a domain or company name.
     /// 
-    /// # Parameters
-    /// - `first_name`: Mandatory first name
-    /// - `domain`: Optional domain name (e.g., "example.com")
-    /// - `company_name`: Optional company name (e.g., "Example Inc")
-    /// - `middle_name`: Optional middle name
-    /// - `last_name`: Optional last name
+    /// Returns a builder that allows you to set parameters using method chaining.
     /// 
     /// # Requirements
-    /// Exactly one of `domain` or `company_name` must be provided (XOR requirement).
+    /// - `first_name` is mandatory
+    /// - Exactly one of `domain` or `company_name` must be provided (XOR requirement)
     /// 
     /// # Example
     /// ```
@@ -120,82 +155,27 @@ impl ZeroBounce {
     /// 
     /// let zb = ZeroBounce::new("your_api_key");
     /// // Using domain
-    /// let result = zb.find_email_v2("John", "example.com", None, None, "Doe");
+    /// let result = zb.find_email_v2()
+    ///     .first_name("John")
+    ///     .domain("example.com")
+    ///     .last_name("Doe")
+    ///     .call()?;
     /// // Or using company name
-    /// let result = zb.find_email_v2("John", None, "Example Inc", None, "Doe");
+    /// let result = zb.find_email_v2()
+    ///     .first_name("John")
+    ///     .company_name("Example Inc")
+    ///     .last_name("Doe")
+    ///     .call()?;
     /// ```
-    pub fn find_email_v2<'a>(
-        &self,
-        first_name: &str,
-        domain: impl Into<Option<&'a str>>,
-        company_name: impl Into<Option<&'a str>>,
-        middle_name: impl Into<Option<&'a str>>,
-        last_name: impl Into<Option<&'a str>>,
-    ) -> ZBResult<FindEmailResponseV2> {
-        let domain = domain.into();
-        let company_name = company_name.into();
-        let middle_name = middle_name.into();
-        let last_name = last_name.into();
-        if first_name.is_empty() {
-            return Err(ZBError::explicit("first_name is mandatory and cannot be empty"));
+    pub fn find_email_v2(&self) -> FindEmailV2Builder<'_> {
+        FindEmailV2Builder {
+            client: self,
+            first_name: None,
+            domain: None,
+            company_name: None,
+            middle_name: None,
+            last_name: None,
         }
-
-        match (domain, company_name) {
-            (Some(d), None) => {
-                if d.is_empty() {
-                    return Err(ZBError::explicit("domain cannot be empty"));
-                }
-            }
-            (None, Some(c)) => {
-                if c.is_empty() {
-                    return Err(ZBError::explicit("company_name cannot be empty"));
-                }
-            }
-            (Some(_), Some(_)) => {
-                return Err(ZBError::explicit("exactly one of domain or company_name must be provided, not both"));
-            }
-            (None, None) => {
-                return Err(ZBError::explicit("either domain or company_name must be provided"));
-            }
-        }
-
-        let mut query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
-            ("first_name", first_name),
-        ]);
-
-        if let Some(d) = domain {
-            query_args.insert("domain", d);
-        }
-
-        if let Some(c) = company_name {
-            query_args.insert("company_name", c);
-        }
-
-        if let Some(middle) = middle_name {
-            if !middle.is_empty() {
-                query_args.insert("middle_name", middle);
-            }
-        }
-
-        if let Some(last) = last_name {
-            if !last.is_empty() {
-                query_args.insert("last_name", last);
-            }
-        }
-
-        let response_content = self.generic_get_request(
-            self.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
-        )?;
-
-        // Debug: Print raw response to examine structure in debug mode
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("Raw API response: {}", response_content);
-        }
-
-        let find_email_response = from_str::<FindEmailResponseV2>(&response_content)?;
-        Ok(find_email_response)
     }
 
     /// Deprecated: Use `domain_search_v2` instead.
@@ -211,9 +191,7 @@ impl ZeroBounce {
 
     /// Search for email formats using either a domain or company name.
     /// 
-    /// # Parameters
-    /// - `domain`: Optional domain name (e.g., "example.com")
-    /// - `company_name`: Optional company name (e.g., "Example Inc")
+    /// Returns a builder that allows you to set parameters using method chaining.
     /// 
     /// # Requirements
     /// Exactly one of `domain` or `company_name` must be provided (XOR requirement).
@@ -224,18 +202,65 @@ impl ZeroBounce {
     /// 
     /// let zb = ZeroBounce::new("your_api_key");
     /// // Using domain
-    /// let result = zb.domain_search_v2("example.com", None);
+    /// let result = zb.domain_search_v2()
+    ///     .domain("example.com")
+    ///     .call()?;
     /// // Or using company name
-    /// let result = zb.domain_search_v2(None, "Example Inc");
+    /// let result = zb.domain_search_v2()
+    ///     .company_name("Example Inc")
+    ///     .call()?;
     /// ```
-    pub fn domain_search_v2<'a>(
-        &self,
-        domain: impl Into<Option<&'a str>>,
-        company_name: impl Into<Option<&'a str>>,
-    ) -> ZBResult<DomainSearchResponseV2> {
-        let domain = domain.into();
-        let company_name = company_name.into();
-        match (domain, company_name) {
+    pub fn domain_search_v2(&self) -> DomainSearchV2Builder<'_> {
+        DomainSearchV2Builder {
+            client: self,
+            domain: None,
+            company_name: None,
+        }
+    }
+
+}
+
+impl<'a> FindEmailV2Builder<'a> {
+    /// Set the first name (mandatory).
+    pub fn first_name(mut self, name: &'a str) -> Self {
+        self.first_name = Some(name);
+        self
+    }
+
+    /// Set the domain name (exactly one of domain or company_name must be provided).
+    pub fn domain(mut self, domain: &'a str) -> Self {
+        self.domain = Some(domain);
+        self
+    }
+
+    /// Set the company name (exactly one of domain or company_name must be provided).
+    pub fn company_name(mut self, company: &'a str) -> Self {
+        self.company_name = Some(company);
+        self
+    }
+
+    /// Set the middle name (optional).
+    pub fn middle_name(mut self, name: &'a str) -> Self {
+        self.middle_name = Some(name);
+        self
+    }
+
+    /// Set the last name (optional).
+    pub fn last_name(mut self, name: &'a str) -> Self {
+        self.last_name = Some(name);
+        self
+    }
+
+    /// Execute the API call and return the result.
+    pub fn call(self) -> ZBResult<FindEmailResponseV2> {
+        let first_name = self.first_name.ok_or_else(|| ZBError::explicit("first_name is mandatory and must be set"))?;
+        
+        if first_name.is_empty() {
+            return Err(ZBError::explicit("first_name cannot be empty"));
+        }
+
+        // Validate XOR requirement: exactly one of domain or company_name must be provided
+        match (self.domain, self.company_name) {
             (Some(d), None) => {
                 if d.is_empty() {
                     return Err(ZBError::explicit("domain cannot be empty"));
@@ -255,19 +280,94 @@ impl ZeroBounce {
         }
 
         let mut query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
+            ("api_key", self.client.api_key.as_str()),
+            ("first_name", first_name),
         ]);
 
-        if let Some(d) = domain {
+        if let Some(d) = self.domain {
             query_args.insert("domain", d);
         }
 
-        if let Some(c) = company_name {
+        if let Some(c) = self.company_name {
             query_args.insert("company_name", c);
         }
 
-        let response_content = self.generic_get_request(
-            self.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
+        if let Some(middle) = self.middle_name {
+            if !middle.is_empty() {
+                query_args.insert("middle_name", middle);
+            }
+        }
+
+        if let Some(last) = self.last_name {
+            if !last.is_empty() {
+                query_args.insert("last_name", last);
+            }
+        }
+
+        let response_content = self.client.generic_get_request(
+            self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
+        )?;
+
+        // Debug: Print raw response to examine structure in debug mode
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Raw API response: {}", response_content);
+        }
+
+        let find_email_response = from_str::<FindEmailResponseV2>(&response_content)?;
+        Ok(find_email_response)
+    }
+}
+
+impl<'a> DomainSearchV2Builder<'a> {
+    /// Set the domain name (exactly one of domain or company_name must be provided).
+    pub fn domain(mut self, domain: &'a str) -> Self {
+        self.domain = Some(domain);
+        self
+    }
+
+    /// Set the company name (exactly one of domain or company_name must be provided).
+    pub fn company_name(mut self, company: &'a str) -> Self {
+        self.company_name = Some(company);
+        self
+    }
+
+    /// Execute the API call and return the result.
+    pub fn call(self) -> ZBResult<DomainSearchResponseV2> {
+        // Validate XOR requirement: exactly one of domain or company_name must be provided
+        match (self.domain, self.company_name) {
+            (Some(d), None) => {
+                if d.is_empty() {
+                    return Err(ZBError::explicit("domain cannot be empty"));
+                }
+            }
+            (None, Some(c)) => {
+                if c.is_empty() {
+                    return Err(ZBError::explicit("company_name cannot be empty"));
+                }
+            }
+            (Some(_), Some(_)) => {
+                return Err(ZBError::explicit("exactly one of domain or company_name must be provided, not both"));
+            }
+            (None, None) => {
+                return Err(ZBError::explicit("either domain or company_name must be provided"));
+            }
+        }
+
+        let mut query_args = HashMap::from([
+            ("api_key", self.client.api_key.as_str()),
+        ]);
+
+        if let Some(d) = self.domain {
+            query_args.insert("domain", d);
+        }
+
+        if let Some(c) = self.company_name {
+            query_args.insert("company_name", c);
+        }
+
+        let response_content = self.client.generic_get_request(
+            self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
 
         // Debug: Print raw response to examine structure in debug mode
@@ -279,7 +379,6 @@ impl ZeroBounce {
         let domain_search_response = from_str::<DomainSearchResponseV2>(&response_content)?;
         Ok(domain_search_response)
     }
-
 }
 
 #[cfg(test)]
