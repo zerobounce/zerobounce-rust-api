@@ -318,12 +318,6 @@ impl<'a> FindEmailV2Builder<'a> {
             self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
 
-        // Debug: Print raw response to examine structure in debug mode
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("Raw API response: {}", response_content);
-        }
-
         let find_email_response = from_str::<FindEmailResponseV2>(&response_content)?;
         Ok(find_email_response)
     }
@@ -377,12 +371,6 @@ impl<'a> DomainSearchV2Builder<'a> {
         let response_content = self.client.generic_get_request(
             self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
-
-        // Debug: Print raw response to examine structure in debug mode
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("Raw API response: {}", response_content);
-        }
 
         let domain_search_response = from_str::<DomainSearchResponseV2>(&response_content)?;
         Ok(domain_search_response)

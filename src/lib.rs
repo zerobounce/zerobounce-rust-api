@@ -60,6 +60,12 @@ impl ZeroBounce {
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
 
+        // Debug: Print raw response to examine structure in debug mode
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Raw API response: {}", response_content);
+        }
+
         if !response_ok {
             return Err(ZBError::ExplicitError(response_content));
         }
