@@ -192,6 +192,7 @@ impl ZeroBounce {
         since = "1.2.0",
         note = "Use `domain_search_v2` instead. The new version supports both domain and company_name parameters."
     )]
+    #[allow(deprecated)] // This method uses deprecated find_email, which is expected
     pub fn domain_search(&self, domain: &str) -> ZBResult<FindEmailResponse> {
         self.find_email(domain, "", "", "")
     }
