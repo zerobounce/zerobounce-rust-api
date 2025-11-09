@@ -6,7 +6,40 @@ pub mod mock_constants;
 pub const CONTENT_TYPE_JSON: &str = "application/json";
 pub const CONTENT_TYPE_STREAM: &str = "application/octet-stream";
 
-pub const URI: &str = "https://api.zerobounce.net/v2";
+/// Enum representing the available API base URLs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApiBaseUrl {
+    /// Default API URL: https://api.zerobounce.net/v2/
+    Default,
+    /// USA API URL: https://api-us.zerobounce.net/v2/
+    USA,
+    /// EU API URL: https://api-eu.zerobounce.net/v2/
+    EU,
+}
+
+impl ApiBaseUrl {
+    /// Get the URL string for this API base URL
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ApiBaseUrl::Default => "https://api.zerobounce.net/v2/",
+            ApiBaseUrl::USA => "https://api-us.zerobounce.net/v2/",
+            ApiBaseUrl::EU => "https://api-eu.zerobounce.net/v2/",
+        }
+    }
+}
+
+impl From<ApiBaseUrl> for String {
+    fn from(url: ApiBaseUrl) -> Self {
+        url.as_str().to_string()
+    }
+}
+
+impl From<&ApiBaseUrl> for String {
+    fn from(url: &ApiBaseUrl) -> Self {
+        url.as_str().to_string()
+    }
+}
+
 pub const BULK_URI: &str = "https://bulkapi.zerobounce.net/v2";
 pub const ENDPOINT_CREDITS: &str = "/getcredits";
 pub const ENDPOINT_ACTIVITY_DATA: &str = "/activity";

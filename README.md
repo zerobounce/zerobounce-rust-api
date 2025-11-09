@@ -9,6 +9,54 @@ This crate uses the zero-bounce API which requires an API key. Check [this guide
 
 Check the [example snippets](https://github.com/zerobounce/zerobounce-rust-api/tree/main/examples) to see how this library can be integrated in your own project.
 
+## Configuration Options
+
+The `ZeroBounce` client can be configured with different base URLs depending on your region or requirements.
+
+### Default Configuration
+
+The simplest way to create a client is using the default API URL:
+
+```rust
+use zero_bounce::ZeroBounce;
+
+let zb = ZeroBounce::new("your_api_key");
+```
+
+### Enum Values
+
+You can specify a region using the `ApiBaseUrl` enum:
+
+```rust
+use zero_bounce::{ZeroBounce, ApiBaseUrl};
+
+// USA region
+let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::USA);
+
+// EU region
+let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::EU);
+
+// Default (explicit)
+let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::Default);
+```
+
+### Custom URL String
+
+You can also provide a custom base URL as a string:
+
+```rust
+use zero_bounce::ZeroBounce;
+
+let zb = ZeroBounce::with_base_url("your_api_key", "https://custom-api.example.com/v2/");
+```
+
+**Available API Base URLs:**
+- `ApiBaseUrl::Default` - `https://api.zerobounce.net/v2/` (default)
+- `ApiBaseUrl::USA` - `https://api-us.zerobounce.net/v2/`
+- `ApiBaseUrl::EU` - `https://api-eu.zerobounce.net/v2/`
+
+See the [config_options example](https://github.com/zerobounce/zerobounce-rust-api/tree/main/examples/config_options.rs) for a complete demonstration of all configuration options.
+
 ## Email Finding Methods
 
 ### find_email_v2 (Recommended)

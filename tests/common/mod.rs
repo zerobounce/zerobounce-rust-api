@@ -16,6 +16,7 @@ pub(crate) fn instantiate<'s>() -> (ServerGuard, ZeroBounce) {
     };
     let zb_instance = ZeroBounce {
         api_key: MOCK_API_KEY.to_string().clone(),
+        base_url: mock_url.clone(),
         client: reqwest::blocking::Client::default(),
         url_provider: mock_url_provider,
     };
@@ -29,6 +30,7 @@ pub(crate) fn endpoint_matcher(endpoint: &str) -> Matcher {
 pub(crate) fn invalid_url_zb_instance() -> ZeroBounce {
     ZeroBounce {
         api_key: MOCK_API_KEY.to_string().clone(),
+        base_url: INVALID_URL.to_owned(),
         client: reqwest::blocking::Client::default(),
         url_provider: ZBUrlProvider {
             url: INVALID_URL.to_owned(),
