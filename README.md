@@ -565,3 +565,47 @@ println!("Delete successful: {}", delete_result.success);
 ```
 
 **Returns:** `ZBFileFeedback` - Same structure as `bulk_validation_result_delete`
+
+## Development
+
+```bash
+# install
+sudo apt update
+sudo apt install cargo rustc rustup
+rustup update
+rustup default stable
+```
+
+```bash
+# run tests
+cargo test
+cargo test find_email_v2
+cargo test --release
+
+# output
+running 83 tests
+test bulk::ai_scoring::test_ai_scoring_delete_not_ok ... ok
+test bulk::ai_scoring::test_ai_scoring_delete_invalid_json ... ok
+...
+test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.42s
+```
+
+```bash
+# run examples
+# WARNING: examples use live server, will consume credits
+cp .env.sample.env .env
+vi .env # set ZERO_BOUNCE_API_KEY
+cargo run --example # list of available examples
+cargo run --example domain_search_v2
+```
+
+```bash
+# build
+cargo build --release
+cargo package 
+
+# publish
+cargo login <api-token>
+cargo publis --dry-run
+cargo publish
+```
