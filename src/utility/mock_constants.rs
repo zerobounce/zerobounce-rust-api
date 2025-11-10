@@ -25,6 +25,7 @@ pub const API_USAGE_RESPONSE: &str = r#"
     "sub_status_possible_typo": 0,
     "sub_status_no_dns_entries": 0,
     "sub_status_role_based_catch_all": 0,
+    "sub_status_accept_all": 0,
     "sub_status_mailbox_quota_exceeded": 0,
     "sub_status_forcible_disconnect": 0,
     "sub_status_failed_smtp_connection": 0,
