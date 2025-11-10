@@ -35,7 +35,7 @@ fn test_bulk_validate_submit_bad_request() {
     let mock = mock_server.mock("POST", endpoint_matcher(ENDPOINT_FILE_SEND))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::BULK_VALIDATION_SUBMIT_ERROR.clone())
+        .with_body(mock_constants::BULK_VALIDATION_SUBMIT_ERROR)
         .create();
 
     let zb_file = &generate_zb_file();
@@ -56,7 +56,7 @@ fn test_bulk_validate_submit_ok() {
     let mock = mock_server.mock("POST", endpoint_matcher(ENDPOINT_FILE_SEND))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::BULK_VALIDATION_SUBMIT_OK.clone())
+        .with_body(mock_constants::BULK_VALIDATION_SUBMIT_OK)
         .create();
 
     let zb_file = &generate_zb_file();
@@ -91,7 +91,7 @@ fn test_bulk_validate_status_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_STATUS))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let response = zb_instance.bulk_validation_file_status_check("mock_file_id");
@@ -111,7 +111,7 @@ fn test_bulk_validate_status_ok() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_STATUS))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::BULK_VALIDATION_STATUS_OK.clone())
+        .with_body(mock_constants::BULK_VALIDATION_STATUS_OK)
         .create();
 
     let response = zb_instance.bulk_validation_file_status_check("mock_file_id");
@@ -145,7 +145,7 @@ fn test_bulk_validate_result_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_RESULT))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let response = zb_instance.bulk_validation_result_fetch("mock_file_id");
@@ -165,7 +165,7 @@ fn test_bulk_validate_result_false_positive() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_RESULT))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::BULK_VALIDATION_RESULT_DELETED.clone())
+        .with_body(mock_constants::BULK_VALIDATION_RESULT_DELETED)
         .create();
 
     let response = zb_instance.bulk_validation_result_fetch("mock_file_id");
@@ -231,7 +231,7 @@ fn test_bulk_validate_delete_bad_request() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_DELETE))
         .with_status(400)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::INVALID_API_RESPONSE.clone())
+        .with_body(mock_constants::INVALID_API_RESPONSE)
         .create();
 
     let response = zb_instance.bulk_validation_result_delete("mock_file_id");
@@ -251,7 +251,7 @@ fn test_bulk_validate_delete_not_ok() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_DELETE))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::BULK_VALIDATION_DELETE_NOT_FOUND.clone())
+        .with_body(mock_constants::BULK_VALIDATION_DELETE_NOT_FOUND)
         .create();
 
     let response = zb_instance.bulk_validation_result_delete("mock_file_id");
@@ -269,7 +269,7 @@ fn test_bulk_validate_delete_ok() {
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_DELETE))
         .with_status(200)
         .with_header("content-type", CONTENT_TYPE_JSON)
-        .with_body(mock_constants::BULK_VALIDATION_DELETE_OK.clone())
+        .with_body(mock_constants::BULK_VALIDATION_DELETE_OK)
         .create();
 
     let response = zb_instance.bulk_validation_result_delete("mock_file_id");

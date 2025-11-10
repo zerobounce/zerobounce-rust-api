@@ -1,12 +1,17 @@
+use std::env;
 use std::io::Write;
 
 use zero_bounce::utility::ZBResult;
 use zero_bounce::utility::structures::bulk::ZBBulkResponse;
 use zero_bounce::{ZeroBounce, ZBFile};
 
-const ZERO_BOUNCE_API_KEY: &str = "YOUR API KEY";
-
 fn main() -> ZBResult<()> {
+    // Load environment variables from .env file
+    dotenv::dotenv().ok();
+    
+    // Get API key from environment variable
+    let api_key = env::var("ZERO_BOUNCE_API_KEY")
+        .expect("ZERO_BOUNCE_API_KEY must be set in .env file");
 
     let file_content = String::from("")
         + "invalid@example.com\n"
@@ -16,7 +21,7 @@ fn main() -> ZBResult<()> {
 
     // initialize ZBFile to be used for bulk request
     let file_content_vec = Vec::from(file_content);
-    let zb_instance = ZeroBounce::new(ZERO_BOUNCE_API_KEY);
+    let zb_instance = ZeroBounce::new(&api_key);
     let mut zb_file = ZBFile::from_content(file_content_vec);
 
     // Alternatively:

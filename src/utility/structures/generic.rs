@@ -31,6 +31,7 @@ pub struct ApiUsage {
     pub sub_status_possible_typo: u64,
     pub sub_status_no_dns_entries: u64,
     pub sub_status_role_based_catch_all: u64,
+    pub sub_status_accept_all: u64,
     pub sub_status_mailbox_quota_exceeded: u64,
     pub sub_status_forcible_disconnect: u64,
     pub sub_status_failed_smtp_connection: u64,
@@ -67,6 +68,45 @@ pub struct FindEmailResponse {
     pub confidence: String,
     pub did_you_mean: String,
     pub failure_reason: String,
+    pub other_domain_formats: Vec<DomainFormats>,
+}
+
+/// Response structure for the new find_email_v2 API endpoint.
+/// This structure matches the new API response format which includes
+/// `email_confidence` and `company_name` fields.
+#[derive(Clone, Debug, Deserialize)]
+pub struct FindEmailResponseV2 {
+    pub email: String,
+    #[serde(default)]
+    pub domain: String,
+    #[serde(rename = "email_confidence", default)]
+    pub confidence: String,
+    #[serde(default)]
+    pub company_name: String,
+    #[serde(default)]
+    pub did_you_mean: String,
+    #[serde(default)]
+    pub failure_reason: String,
+}
+
+/// Response structure for the new domain_search_v2 API endpoint.
+/// This structure matches the domain search API response format which includes
+/// `format`, `confidence`, and `other_domain_formats` fields.
+#[derive(Clone, Debug, Deserialize)]
+pub struct DomainSearchResponseV2 {
+    #[serde(default)]
+    pub domain: String,
+    #[serde(default)]
+    pub company_name: String,
+    #[serde(default)]
+    pub format: String,
+    #[serde(default)]
+    pub confidence: String,
+    #[serde(default)]
+    pub did_you_mean: String,
+    #[serde(default)]
+    pub failure_reason: String,
+    #[serde(default)]
     pub other_domain_formats: Vec<DomainFormats>,
 }
 

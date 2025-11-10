@@ -13,11 +13,10 @@ impl ZeroBounce {
 
     pub fn validate_email_and_ip(&self, email: &str, ip_address: &str) -> ZBResult<ZBValidation> {
         let mut query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("email", email),
         ]);
 
-        if ip_address.is_empty() {
+        if !ip_address.is_empty() {
             query_args.insert("ip_address", ip_address);
         }
 
@@ -89,6 +88,12 @@ impl ZeroBounce {
 
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
+
+        // Debug: Print raw response to examine structure in debug mode
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Raw API response: {}", response_content);
+        }
 
         if !response_ok {
             return Err(ZBError::ExplicitError(response_content));

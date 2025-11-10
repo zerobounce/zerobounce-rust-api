@@ -23,6 +23,13 @@ impl ZeroBounce {
 
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
+
+        // Debug: Print raw response to examine structure in debug mode
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Raw API response: {}", response_content);
+        }
+
         if !response_ok {
             return Err(ZBError::ExplicitError(response_content));
         }
@@ -33,7 +40,6 @@ impl ZeroBounce {
 
     fn generic_file_status_check(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileStatus> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
         ]);
 
@@ -47,7 +53,6 @@ impl ZeroBounce {
 
     fn generic_result_fetch(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBBulkResponse> {
         let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
         ]);
 
@@ -69,6 +74,11 @@ impl ZeroBounce {
         let status_amount = response.status().as_u16();
         if !response.status().is_success() {
             let response_content = response.text()?;
+            // Debug: Print raw response to examine structure in debug mode
+            #[cfg(debug_assertions)]
+            {
+                eprintln!("Raw API response: {}", response_content);
+            }
             return Err(ZBError::ExplicitError(response_content))
         }
 
@@ -78,6 +88,15 @@ impl ZeroBounce {
         }
 
         let response_content = response.text()?;
+
+        // Debug: Print raw response to examine structure in debug mode (only for JSON responses)
+        #[cfg(debug_assertions)]
+        {
+            if content_type == CONTENT_TYPE_JSON {
+                eprintln!("Raw API response: {}", response_content);
+            }
+        }
+
         if content_type == CONTENT_TYPE_JSON {
             let feedback_res = from_str::<ZBFileFeedback>(&response_content);
             if let Ok(file_feedback) = feedback_res {
@@ -97,7 +116,6 @@ impl ZeroBounce {
 
     fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback>{
         let query_args = HashMap::from([
-            ("api_key", self.api_key.as_str()),
             ("file_id", file_id),
         ]);
 

@@ -25,6 +25,7 @@ pub const API_USAGE_RESPONSE: &str = r#"
     "sub_status_possible_typo": 0,
     "sub_status_no_dns_entries": 0,
     "sub_status_role_based_catch_all": 0,
+    "sub_status_accept_all": 0,
     "sub_status_mailbox_quota_exceeded": 0,
     "sub_status_forcible_disconnect": 0,
     "sub_status_failed_smtp_connection": 0,
@@ -300,6 +301,72 @@ pub const MOCK_FIND_MAIL_VALID: &str = r#"{
     "format": "first.last",
     "status": "valid",
     "sub_status": "",
+    "confidence": "high",
+    "did_you_mean": "",
+    "failure_reason": "",
+    "other_domain_formats": [
+        {
+            "format": "first_last",
+            "confidence": "high"
+        },
+        {
+            "format": "first",
+            "confidence": "medium"
+        }
+    ]
+}"#;
+
+pub const MOCK_FIND_EMAIL_V2_DOMAIN_VALID: &str = r#"{
+    "email": "john.doe@example.com",
+    "email_confidence": "high",
+    "domain": "",
+    "company_name": "Internet Assigned Numbers Authority",
+    "did_you_mean": "",
+    "failure_reason": ""
+}"#;
+
+pub const MOCK_FIND_EMAIL_V2_COMPANY_VALID: &str = r#"{
+    "email": "john.doe@example.com",
+    "email_confidence": "high",
+    "domain": "betheexample.org",
+    "company_name": "Example Inc",
+    "did_you_mean": "",
+    "failure_reason": ""
+}"#;
+
+pub const MOCK_FIND_EMAIL_V2_INVALID: &str = r#"{
+    "email": "",
+    "email_confidence": "undetermined",
+    "domain": "betheexample.org",
+    "company_name": "Example Inc",
+    "did_you_mean": "",
+    "failure_reason": ""
+}"#;
+
+pub const MOCK_DOMAIN_SEARCH_V2_DOMAIN: &str = r#"{
+    "domain": "example.com",
+    "company_name": "",
+    "format": "unknown",
+    "confidence": "undetermined",
+    "did_you_mean": "",
+    "failure_reason": "",
+    "other_domain_formats": []
+}"#;
+
+pub const MOCK_DOMAIN_SEARCH_V2_COMPANY: &str = r#"{
+    "domain": "betheexample.org",
+    "company_name": "Example Inc",
+    "format": "unknown",
+    "confidence": "undetermined",
+    "did_you_mean": "",
+    "failure_reason": "",
+    "other_domain_formats": []
+}"#;
+
+pub const MOCK_DOMAIN_SEARCH_V2_WITH_FORMATS: &str = r#"{
+    "domain": "example.com",
+    "company_name": "",
+    "format": "first.last",
     "confidence": "high",
     "did_you_mean": "",
     "failure_reason": "",
