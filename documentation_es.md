@@ -235,6 +235,7 @@ println!("Total de llamadas API: {}", usage.total);
 - `sub_status_does_not_accept_mail`: Número de direcciones que no aceptan correo
 - `sub_status_alias_address`: Número de direcciones alias
 - `sub_status_role_based_catch_all`: Número de direcciones catch-all basadas en roles
+- `sub_status_accept_all`: Número de direcciones accept-all
 - `sub_status_disposable`: Número de direcciones desechables
 - `sub_status_toxic`: Número de direcciones tóxicas
 

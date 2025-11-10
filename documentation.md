@@ -235,6 +235,7 @@ println!("Total API calls: {}", usage.total);
 - `sub_status_does_not_accept_mail`: Number of addresses that don't accept mail
 - `sub_status_alias_address`: Number of alias addresses
 - `sub_status_role_based_catch_all`: Number of role-based catch-all addresses
+- `sub_status_accept_all`: Number of accept-all addresses
 - `sub_status_disposable`: Number of disposable addresses
 - `sub_status_toxic`: Number of toxic addresses
 

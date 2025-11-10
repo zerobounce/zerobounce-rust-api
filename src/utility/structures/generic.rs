@@ -31,6 +31,7 @@ pub struct ApiUsage {
     pub sub_status_possible_typo: u64,
     pub sub_status_no_dns_entries: u64,
     pub sub_status_role_based_catch_all: u64,
+    pub sub_status_accept_all: u64,
     pub sub_status_mailbox_quota_exceeded: u64,
     pub sub_status_forcible_disconnect: u64,
     pub sub_status_failed_smtp_connection: u64,
