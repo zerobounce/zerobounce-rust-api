@@ -31,8 +31,10 @@ pub const API_USAGE_RESPONSE: &str = r#"
     "sub_status_failed_smtp_connection": 0,
     "sub_status_mx_forward": 0,
     "sub_status_alternate": 0,
-    "sub_status_blocked": 0,
     "sub_status_allowed": 0,
+    "sub_status_blocked": 0,
+    "sub_status_gold": 0,
+    "sub_status_role_based_accept_all": 0,
     "start_date": "1/12/2010",
     "end_date": "12/1/2030"
 }

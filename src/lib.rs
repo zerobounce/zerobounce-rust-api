@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 pub use crate::utility::{ZBError, ZBResult, ApiBaseUrl};
 pub use crate::utility::structures::{ActivityData, ApiUsage};
-pub use crate::utility::structures::bulk::{ZBFile, ZBFileFeedback, ZBFileStatus};
+pub use crate::utility::structures::bulk::{ZBFile, ZBFileFeedback, ZBFileStatus, ZBBulkResponse};
+pub use crate::utility::structures::validate_enums::{ZBValidateStatus, ZBValidateSubStatus};
 pub use crate::api::{FindEmailV2Builder, DomainSearchV2Builder};
 
 // Structure meant to generate the URLs to be accessed with the HTTP requests

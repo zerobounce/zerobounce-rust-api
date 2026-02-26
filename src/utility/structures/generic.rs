@@ -36,6 +36,11 @@ pub struct ApiUsage {
     pub sub_status_forcible_disconnect: u64,
     pub sub_status_failed_smtp_connection: u64,
     pub sub_status_mx_forward: u64,
+    pub sub_status_alternate: u64,
+    pub sub_status_allowed: u64,
+    pub sub_status_blocked: u64,
+    pub sub_status_gold: u64,
+    pub sub_status_role_based_accept_all: u64,
 
     #[serde(deserialize_with="deserialize_only_date")]
     pub start_date: NaiveDate,

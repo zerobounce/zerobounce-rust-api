@@ -569,6 +569,15 @@ println!("Delete successful: {}", delete_result.success);
 
 ## Development
 
+### Run tests with Docker
+From the **parent repository root** (the folder that contains all SDKs and `docker-compose.yml`):
+
+```bash
+docker compose build rust
+docker compose run --rm rust
+```
+
+### Local setup and tests
 ```bash
 # install
 sudo apt update
@@ -594,8 +603,8 @@ test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 ```bash
 # run examples
 # WARNING: examples use live server, will consume credits
-cp .env.sample.env .env
-vi .env # set ZERO_BOUNCE_API_KEY
+cp .env.example .env
+# Edit .env and set ZEROBOUNCE_API_KEY=your_api_key_here
 cargo run --example # list of available examples
 cargo run --example domain_search_v2
 ```

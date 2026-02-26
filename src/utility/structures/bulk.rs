@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::io::Read;
 
 use bytes::Bytes;
 use chrono::{DateTime, FixedOffset};
@@ -80,6 +81,10 @@ pub struct ZBFile {
     last_name_column: Option<u32>,
     gender_column: Option<u32>,
     ip_address_column: Option<u32>,
+    /// Optional callback URL for when validation/scoring is complete (sendfile APIs).
+    return_url: Option<String>,
+    /// Optional file name for multipart upload; used when content is raw (from_content). Ignored when using file path.
+    file_name: Option<String>,
 }
 
 impl Default for ZBFile {
@@ -93,6 +98,8 @@ impl Default for ZBFile {
             last_name_column: None,
             gender_column: None,
             ip_address_column: None,
+            return_url: None,
+            file_name: None,
         }
     }
 }
@@ -113,17 +120,36 @@ impl ZBFile {
         }
     }
 
+    /// Create a ZBFile from raw bytes with a specific file name (e.g. for stream-based uploads).
+    pub fn from_content_with_filename(content: Vec<u8>, file_name: impl Into<String>) -> ZBFile {
+        ZBFile {
+            content_type: ZBFileContentType::RawContent(content),
+            file_name: Some(file_name.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create a ZBFile from any reader (e.g. in-memory stream, network stream). Reads the entire content into memory.
+    pub fn from_reader(mut reader: impl Read, file_name: impl Into<String>) -> ZBResult<ZBFile> {
+        let mut content = Vec::new();
+        reader.read_to_end(&mut content)?;
+        Ok(Self::from_content_with_filename(content, file_name))
+    }
+
     fn file_content_multipart(&self) -> ZBResult<Part> {
         match self.content_type.clone() {
             ZBFileContentType::Empty => Err(ZBError::explicit("bulk content cannot be empty")),
             ZBFileContentType::FilePath(file_path) => Ok(
                 Part::file(file_path.clone())?
             ),
-            ZBFileContentType::RawContent(value) => Ok(
-                Part::bytes(value.clone())
-                    .file_name("file.csv")
-                    .mime_str("text/csv")?
-            ),
+            ZBFileContentType::RawContent(value) => {
+                let name = self.file_name.clone().unwrap_or_else(|| "file.csv".to_string());
+                Ok(
+                    Part::bytes(value)
+                        .file_name(name)
+                        .mime_str("text/csv")?
+                )
+            }
         }
     }
 
@@ -147,8 +173,23 @@ impl ZBFile {
         if let Some(amount) = self.ip_address_column {
             multipart_form = multipart_form.text("ip_address_column", amount.to_string());
         }
+        if let Some(url) = &self.return_url {
+            multipart_form = multipart_form.text("return_url", url.clone());
+        }
 
         Ok(multipart_form)
+    }
+
+    /// Set the callback URL for when validation/scoring is complete (optional).
+    pub fn set_return_url(mut self, return_url: Option<impl Into<String>>) -> Self {
+        self.return_url = return_url.map(Into::into);
+        self
+    }
+
+    /// Set the file name used when uploading raw content (optional; default "file.csv").
+    pub fn set_file_name(mut self, file_name: Option<impl Into<String>>) -> Self {
+        self.file_name = file_name.map(Into::into);
+        self
     }
 
     pub fn set_has_header_row(mut self, has_header_row: bool) -> Self {

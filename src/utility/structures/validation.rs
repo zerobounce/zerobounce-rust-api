@@ -1,8 +1,8 @@
 use chrono::NaiveDateTime;
-
 use serde::Deserialize;
 
 use crate::utility::structures::custom_deserialize::deserialize_naive_date;
+use crate::utility::structures::validate_enums::{ZBValidateStatus, ZBValidateSubStatus};
 
 
 #[derive(Clone, Debug, Deserialize)]
@@ -28,6 +28,18 @@ pub struct ZBValidation {
 
     #[serde(deserialize_with="deserialize_naive_date")]
     pub processed_at: NaiveDateTime,
+}
+
+impl ZBValidation {
+    /// Parse `status` string into typed enum (unknown API values become `ZBValidateStatus::UnknownValue`).
+    pub fn status_enum(&self) -> ZBValidateStatus {
+        self.status.parse().unwrap_or_else(|_| ZBValidateStatus::UnknownValue(self.status.clone()))
+    }
+
+    /// Parse `sub_status` string into typed enum (unknown API values become `ZBValidateSubStatus::UnknownValue`).
+    pub fn sub_status_enum(&self) -> ZBValidateSubStatus {
+        self.sub_status.parse().unwrap_or_else(|_| ZBValidateSubStatus::UnknownValue(self.sub_status.clone()))
+    }
 }
 
 
