@@ -609,13 +609,6 @@ cargo run --example # list of available examples
 cargo run --example domain_search_v2
 ```
 
-```bash
-# build
-cargo build --release
-cargo package 
+## Publish
 
-# publish
-cargo login <api-token>
-cargo publis --dry-run
-cargo publish
-```
+See the [sdk-docs (crates.io)](../sdk-docs/crates-io/) guide in the SDKs repo for `cargo publish` and release steps.
