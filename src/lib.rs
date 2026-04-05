@@ -5,7 +5,10 @@ use std::collections::HashMap;
 
 pub use crate::utility::{ZBError, ZBResult, ApiBaseUrl};
 pub use crate::utility::structures::{ActivityData, ApiUsage};
-pub use crate::utility::structures::bulk::{ZBFile, ZBFileFeedback, ZBFileStatus, ZBBulkResponse};
+pub use crate::utility::structures::bulk::{
+    zb_download_type, ZBFile, ZBFileFeedback, ZBFileStatus, ZBBulkResponse, ZBGetFileOptions,
+};
+pub use crate::utility::{format_get_file_error_message, get_file_json_indicates_error};
 pub use crate::utility::structures::validate_enums::{ZBValidateStatus, ZBValidateSubStatus};
 pub use crate::api::{FindEmailV2Builder, DomainSearchV2Builder};
 

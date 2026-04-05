@@ -159,7 +159,7 @@ fn test_ai_scoring_result_bad_request() {
 }
 
 #[test]
-fn test_ai_scoring_result_false_positive() {
+fn test_ai_scoring_result_json_error_http_200() {
     let (mut mock_server, zb_instance) = instantiate();
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_SCORING_RESULT))
@@ -170,14 +170,12 @@ fn test_ai_scoring_result_false_positive() {
 
     let response = zb_instance.ai_scoring_result_fetch("mock_file_id");
     mock.assert();
-    assert!(response.is_ok());
+    assert!(response.is_err());
 
-    let response_obj = response.unwrap();
-    if let ZBBulkResponse::Feedback(feedback) = response_obj {
-        assert_eq!(feedback.success, false)
-    } else {
-        panic!("unexpected response type: {:#?}", response_obj)
-    }
+    let ZBError::ExplicitError(msg) = response.unwrap_err() else {
+        panic!("expected ExplicitError");
+    };
+    assert!(msg.contains("File deleted"), "{}", msg);
 }
 
 #[test]

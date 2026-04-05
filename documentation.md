@@ -363,6 +363,10 @@ println!("Email batch: {:#?}", batch_result.email_batch);
 
 Bulk validation allows you to upload a file containing multiple email addresses for validation. The process involves submitting a file, checking its status, fetching results, and optionally deleting the file.
 
+Bulk flows use the [v2 bulk API](https://www.zerobounce.net/docs/email-validation-api-quickstart/v2-send-file). For optional [v2 get file](https://www.zerobounce.net/docs/email-validation-api-quickstart/v2-get-file) query parameters, use `bulk_validation_result_fetch_with_options` / `ai_scoring_result_fetch_with_options` with `ZBGetFileOptions` (`download_type`, and `activity_data` for validation only). Use `zb_download_type::PHASE_1`, `PHASE_2`, or `COMBINED` for `download_type`. For validation sendfile only, use `.set_allow_phase_2(Some(true))` or `Some(false)` on `ZBFile`; AI scoring sendfile ignores this field.
+
+On success, result fetch returns `ZBBulkResponse::Content(bytes)`. Non-success HTTP statuses and JSON error bodies (including some HTTP 200 responses with `"success": false`) return `Err(ZBError::ExplicitError(_))`. Use `get_file_json_indicates_error` / `format_get_file_error_message` from the crate root on a raw body when needed. `ZBFileStatus` includes optional `file_phase_2_status` when the API returns it.
+
 ### bulk_validation_file_submit
 
 Submit a file for bulk email validation.
@@ -422,33 +426,27 @@ println!("Success count: {}", status.success_count);
 
 ### bulk_validation_result_fetch
 
-Fetch the results of a completed bulk validation file.
+Fetch the results of a completed bulk validation file. Sends `api_key` and `file_id` query parameters.
 
 **Arguments:**
 - `file_id: &str` - The file ID returned from `bulk_validation_file_submit`
 
 **Example:**
 ```rust
-use zero_bounce::ZeroBounce;
-use zero_bounce::utility::structures::bulk::ZBBulkResponse;
+use zero_bounce::{ZeroBounce, ZBBulkResponse};
 
 let zb = ZeroBounce::new("your_api_key");
 let result = zb.bulk_validation_result_fetch("file_id_here")?;
-match result {
-    ZBBulkResponse::Content(bytes) => {
-        // File content (CSV format)
-        println!("Received {} bytes", bytes.len());
-    },
-    ZBBulkResponse::Feedback(feedback) => {
-        // Error or status feedback
-        println!("Message: {}", feedback.message);
-    },
+if let ZBBulkResponse::Content(bytes) = result {
+    println!("Received {} bytes", bytes.len());
 }
 ```
 
-**Returns:** `ZBBulkResponse` which can be:
-- `ZBBulkResponse::Content(Vec<u8>)` - The file content as bytes (typically CSV format)
-- `ZBBulkResponse::Feedback(ZBFileFeedback)` - Error or status feedback if the file is not ready or an error occurred
+**Returns:** `Ok(ZBBulkResponse::Content(bytes))` on successful file download; errors are `Err(ZBError::ExplicitError(_))`.
+
+### bulk_validation_result_fetch_with_options
+
+Same as `bulk_validation_result_fetch` with optional v2 `download_type` and `activity_data` (validation only).
 
 ### bulk_validation_result_delete
 
@@ -519,29 +517,25 @@ println!("Complete percentage: {}%", status.complete_percentage);
 
 ### ai_scoring_result_fetch
 
-Fetch the results of a completed AI scoring file.
+Fetch the results of a completed AI scoring file. Same success/error behavior as `bulk_validation_result_fetch`.
 
 **Arguments:**
 - `file_id: &str` - The file ID returned from `ai_scoring_file_submit`
 
 **Example:**
 ```rust
-use zero_bounce::ZeroBounce;
-use zero_bounce::utility::structures::bulk::ZBBulkResponse;
+use zero_bounce::{ZeroBounce, ZBBulkResponse};
 
 let zb = ZeroBounce::new("your_api_key");
 let result = zb.ai_scoring_result_fetch("file_id_here")?;
-match result {
-    ZBBulkResponse::Content(bytes) => {
-        println!("Received {} bytes", bytes.len());
-    },
-    ZBBulkResponse::Feedback(feedback) => {
-        println!("Message: {}", feedback.message);
-    },
+if let ZBBulkResponse::Content(bytes) = result {
+    println!("Received {} bytes", bytes.len());
 }
 ```
 
-**Returns:** `ZBBulkResponse` - Same structure as `bulk_validation_result_fetch`
+### ai_scoring_result_fetch_with_options
+
+Optional `download_type` only; `activity_data` is not sent for scoring getfile.
 
 ### ai_scoring_result_delete
 

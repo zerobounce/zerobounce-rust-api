@@ -1,6 +1,6 @@
-use zero_bounce::ZBError;
+use zero_bounce::{ZBError, get_file_json_indicates_error};
 use zero_bounce::utility::mock_constants;
-use zero_bounce::utility::structures::bulk::ZBBulkResponse;
+use zero_bounce::utility::structures::bulk::{zb_download_type, ZBBulkResponse, ZBGetFileOptions};
 use zero_bounce::utility::{CONTENT_TYPE_JSON, CONTENT_TYPE_STREAM};
 use zero_bounce::utility::{ENDPOINT_FILE_SEND, ENDPOINT_FILE_STATUS, ENDPOINT_FILE_RESULT, ENDPOINT_FILE_DELETE};
 
@@ -159,7 +159,7 @@ fn test_bulk_validate_result_bad_request() {
 }
 
 #[test]
-fn test_bulk_validate_result_false_positive() {
+fn test_bulk_validate_result_json_error_http_200() {
     let (mut mock_server, zb_instance) = instantiate();
 
     let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_RESULT))
@@ -170,14 +170,42 @@ fn test_bulk_validate_result_false_positive() {
 
     let response = zb_instance.bulk_validation_result_fetch("mock_file_id");
     mock.assert();
-    assert!(response.is_ok());
+    assert!(response.is_err());
 
-    let response_obj = response.unwrap();
-    if let ZBBulkResponse::Feedback(feedback) = response_obj {
-        assert_eq!(feedback.success, false)
-    } else {
-        panic!("unexpected response type: {:#?}", response_obj)
-    }
+    let ZBError::ExplicitError(msg) = response.unwrap_err() else {
+        panic!("expected ExplicitError");
+    };
+    assert!(msg.contains("File deleted"), "{}", msg);
+}
+
+#[test]
+fn test_get_file_json_indicates_error_export() {
+    assert!(get_file_json_indicates_error(r#"{"success":false,"message":""}"#));
+    assert!(!get_file_json_indicates_error(r#"{"file_id":"x"}"#));
+}
+
+#[test]
+fn test_bulk_validate_result_fetch_with_options() {
+    let (mut mock_server, zb_instance) = instantiate();
+
+    let expected_content = "col1,col2\n";
+    let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_FILE_RESULT))
+        .with_status(200)
+        .with_header("content-type", CONTENT_TYPE_STREAM)
+        .with_body(expected_content)
+        .create();
+
+    let mut opts = ZBGetFileOptions::default();
+    opts.download_type = Some(zb_download_type::COMBINED.to_string());
+    opts.activity_data = Some(true);
+
+    let response = zb_instance.bulk_validation_result_fetch_with_options("mock_file_id", &opts);
+    mock.assert();
+    assert!(response.is_ok(), "{:#?}", response);
+    let ZBBulkResponse::Content(b) = response.unwrap() else {
+        panic!("expected Content");
+    };
+    assert_eq!(b.as_ref(), expected_content.as_bytes());
 }
 
 #[test]

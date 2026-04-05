@@ -66,10 +66,9 @@ fn main() -> ZBResult<()> {
             println!("Raw content:");
             println!("{:#?}", bytes);
         },
-        ZBBulkResponse::Feedback(feedback) => {
-            println!("Feedback:");
-            println!("{:#?}", feedback);
-        },
+        ZBBulkResponse::Feedback(_) => {
+            println!("(Feedback variant is not returned by result_fetch; errors are Err.)");
+        }
     };
 
     // delete the result file

@@ -28,6 +28,8 @@ pub struct ZBFileStatus {
     pub file_name: String,
     pub file_status: String,
     pub error_reason: Option<String>,
+    #[serde(default)]
+    pub file_phase_2_status: Option<String>,
     pub return_url: Option<String>,
 
     #[serde(deserialize_with="deserialize_date_rfc")]
@@ -35,6 +37,21 @@ pub struct ZBFileStatus {
 
     #[serde(deserialize_with="deserialize_percentage_float")]
     pub complete_percentage: f32,
+}
+
+/// `download_type` query values for bulk getfile (validation and scoring).
+pub mod zb_download_type {
+    pub const PHASE_1: &str = "phase_1";
+    pub const PHASE_2: &str = "phase_2";
+    pub const COMBINED: &str = "combined";
+}
+
+/// Optional v2 query parameters for bulk getfile.
+#[derive(Clone, Debug, Default)]
+pub struct ZBGetFileOptions {
+    pub download_type: Option<String>,
+    /// Validation getfile only; omitted for AI scoring result fetch.
+    pub activity_data: Option<bool>,
 }
 
 pub enum ZBBulkResponse {
@@ -85,6 +102,8 @@ pub struct ZBFile {
     return_url: Option<String>,
     /// Optional file name for multipart upload; used when content is raw (from_content). Ignored when using file path.
     file_name: Option<String>,
+    /// Bulk validation sendfile only; not sent for AI scoring sendfile.
+    pub(crate) allow_phase_2: Option<bool>,
 }
 
 impl Default for ZBFile {
@@ -100,6 +119,7 @@ impl Default for ZBFile {
             ip_address_column: None,
             return_url: None,
             file_name: None,
+            allow_phase_2: None,
         }
     }
 }
@@ -224,6 +244,12 @@ impl ZBFile {
 
     pub fn set_ip_address_column(mut self, ip_address_column: Option<u32>) -> Self {
         self.ip_address_column = ip_address_column;
+        self
+    }
+
+    /// Set `allow_phase_2` for **bulk validation** sendfile only (ignored for AI scoring).
+    pub fn set_allow_phase_2(mut self, allow_phase_2: Option<bool>) -> Self {
+        self.allow_phase_2 = allow_phase_2;
         self
     }
 }

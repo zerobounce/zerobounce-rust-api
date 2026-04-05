@@ -2,6 +2,9 @@ use std::io::Error as IOError;
 
 pub mod structures;
 pub mod mock_constants;
+pub mod bulk_get_file;
+
+pub use bulk_get_file::{format_get_file_error_message, get_file_json_indicates_error};
 
 pub const CONTENT_TYPE_JSON: &str = "application/json";
 pub const CONTENT_TYPE_STREAM: &str = "application/octet-stream";
