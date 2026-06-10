@@ -588,9 +588,10 @@ println!("Delete successful: {}", delete_result.success);
 ## Development
 
 ### Run tests with Docker
-From the **parent repository root** (the folder that contains all SDKs and `docker-compose.yml`):
+From the **`sdk-docs/`** folder in the SDKs monorepo:
 
 ```bash
+cd sdk-docs
 docker compose build rust
 docker compose run --rm rust
 ```
@@ -629,4 +630,7 @@ cargo run --example domain_search_v2
 
 ## Publish
 
-See the [sdk-docs (crates.io)](../sdk-docs/crates-io/) guide in the SDKs repo for `cargo publish` and release steps.
+1. Bump `version` in `Cargo.toml`, commit, tag (`vX.Y.Z`), push tag.
+2. **Actions → Publish → Run workflow** with that tag.
+
+Registry: [zero-bounce on crates.io](https://crates.io/crates/zero-bounce)
