@@ -1,0 +1,118 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        description: Tag to publish (e.g. v2.1.2)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-tag:
+    name: Validate tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Verify tag and crate version
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            echo "Error: Tag is required."
+            exit 1
+          fi
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Error: Tag '$TAG' does not exist."
+            exit 1
+          fi
+          TAG_VERSION="${TAG#v}"
+          PKG_VERSION=$(grep -E '^version\s*=' Cargo.toml | head -1 | sed -E 's/version\s*=\s*"([^"]+)".*/\1/')
+          if [ -z "$PKG_VERSION" ]; then
+            echo "Error: Could not read version from Cargo.toml"
+            exit 1
+          fi
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: Cargo.toml version ($PKG_VERSION) does not match tag ($TAG)."
+            exit 1
+          fi
+          echo "Publishing tag: $TAG (zero-bounce@$PKG_VERSION)"
+
+  test:
+    name: Test
+    needs: [validate-tag]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test --no-fail-fast
+
+  publish:
+    name: Publish to crates.io
+    needs: [test]
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Authenticate with crates.io
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --token "$CARGO_REGISTRY_TOKEN"
+
+  release:
+    name: Create GitHub Release
+    needs: [publish]
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag }}
+          fetch-depth: 0
+
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, skipping."
+          else
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "$TAG" \
+              --generate-notes
+          fi

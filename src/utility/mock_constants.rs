@@ -83,6 +83,7 @@ pub const VALIDATION_RESPONSE_VALID: &str =  r#"
     "domain": null,
     "domain_age_days": "9692",
     "smtp_provider": "example",
+    "catchall_domain": false,
     "mx_found": "true",
     "mx_record": "mx.example.com",
     "firstname": "zero",

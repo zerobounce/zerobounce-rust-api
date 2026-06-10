@@ -16,6 +16,7 @@ pub struct ZBValidation {
     pub domain: Option<String>,
     pub domain_age_days: Option<String>,
     pub smtp_provider: Option<String>,
+    pub catchall_domain: Option<bool>,
     pub mx_record: Option<String>,
     pub mx_found: Option<String>,
     pub firstname: Option<String>,
@@ -113,6 +114,7 @@ mod test {
         assert_eq!(validation.sub_status, "".to_string());
         assert_eq!(validation.did_you_mean, None);
         assert_eq!(validation.smtp_provider, Some("example".to_string()));
+        assert_eq!(validation.catchall_domain, Some(false));
         assert_eq!(validation.free_email, false);
 
         let expected_date = NaiveDateTime::new(
