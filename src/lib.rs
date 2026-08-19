@@ -2,6 +2,7 @@ pub mod api;
 pub mod utility;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 pub use crate::utility::{ZBError, ZBResult, ApiBaseUrl};
 pub use crate::utility::structures::{ActivityData, ApiUsage};
@@ -87,7 +88,7 @@ impl ZeroBounce {
     where
         T: Into<String>,
     {
-        let base_url_string = base_url.into();
+        let base_url_string = require_https_url(base_url.into());
         
         let mut url_provider = ZBUrlProvider::default();
         url_provider.url = base_url_string.clone();
@@ -95,7 +96,10 @@ impl ZeroBounce {
         ZeroBounce {
             api_key: api_key.to_string(),
             base_url: base_url_string,
-            client: reqwest::blocking::Client::default(),
+            client: reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::default()),
             url_provider,
         }
     }
@@ -109,16 +113,52 @@ impl ZeroBounce {
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
 
-        // Debug: Print raw response to examine structure in debug mode
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("Raw API response: {}", response_content);
-        }
-
         if !response_ok {
             return Err(ZBError::ExplicitError(response_content));
         }
 
         Ok(response_content)
+    }
+}
+
+fn require_https_url(url: String) -> String {
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("https://") {
+        return url;
+    }
+    // mockito and local tests use loopback HTTP
+    if lower.starts_with("http://127.0.0.1")
+        || lower.starts_with("http://localhost")
+        || lower.starts_with("http://[::1]")
+    {
+        return url;
+    }
+    panic!("base_url must be an https:// URL");
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::require_https_url;
+
+    #[test]
+    fn accepts_https() {
+        assert_eq!(
+            require_https_url("https://api.zerobounce.net/v2/".to_string()),
+            "https://api.zerobounce.net/v2/"
+        );
+    }
+
+    #[test]
+    fn accepts_loopback_http() {
+        assert_eq!(
+            require_https_url("http://127.0.0.1:1234/".to_string()),
+            "http://127.0.0.1:1234/"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "https://")]
+    fn rejects_remote_http() {
+        require_https_url("http://evil.example/v2/".to_string());
     }
 }
