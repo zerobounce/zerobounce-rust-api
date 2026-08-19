@@ -1,5 +1,6 @@
-# ZeroBounce Rust SDK – test image (Rust 1.83+ for Cargo.lock v4)
-FROM rust:1.83-bookworm
+# ZeroBounce Rust SDK – test image (1.88+; reqwest 0.13 and current crates.io
+# transitives need edition2024 / rustc newer than 1.83)
+FROM rust:1.88-bookworm
 
 WORKDIR /app
 
