@@ -1,4 +1,5 @@
 pub mod bulk;
+pub mod priority3;
 pub mod validation;
 
 use std::collections::HashMap;
@@ -9,7 +10,8 @@ use serde_json::from_str;
 pub use crate::ZeroBounce;
 use crate::utility::structures::generic::{FindEmailResponse, FindEmailResponseV2, DomainSearchResponseV2};
 use crate::utility::{ZBError, ZBResult, ENDPOINT_EMAIL_FINDER};
-use crate::utility::structures::{ActivityData, ApiUsage, ScoreEmailResponse};
+use crate::utility::structures::{ActivityData, ApiUsage};
+use crate::utility::structures::generic::ScoreEmailResponse;
 use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS, ENDPOINT_SCORING};
 
 /// Builder for the `find_email_v2` API call.
