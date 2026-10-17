@@ -58,6 +58,12 @@ pub struct ActivityData {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct ScoreEmailResponse {
+    pub email: String,
+    pub score: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct DomainFormats {
     pub format: String,
     pub confidence: String,

@@ -50,6 +50,7 @@ impl From<&ApiBaseUrl> for String {
 pub const BULK_URI: &str = "https://bulkapi.zerobounce.net/v2";
 pub const ENDPOINT_CREDITS: &str = "/getcredits";
 pub const ENDPOINT_ACTIVITY_DATA: &str = "/activity";
+pub const ENDPOINT_SCORING: &str = "/scoring";
 pub const ENDPOINT_VALIDATE: &str = "/validate";
 pub const ENDPOINT_API_USAGE: &str = "/getapiusage";
 pub const ENDPOINT_BATCH_VALIDATE: &str = "/validatebatch";

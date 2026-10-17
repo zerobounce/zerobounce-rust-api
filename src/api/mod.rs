@@ -9,8 +9,8 @@ use serde_json::from_str;
 pub use crate::ZeroBounce;
 use crate::utility::structures::generic::{FindEmailResponse, FindEmailResponseV2, DomainSearchResponseV2};
 use crate::utility::{ZBError, ZBResult, ENDPOINT_EMAIL_FINDER};
-use crate::utility::structures::{ActivityData, ApiUsage};
-use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS};
+use crate::utility::structures::{ActivityData, ApiUsage, ScoreEmailResponse};
+use crate::utility::{ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS, ENDPOINT_SCORING};
 
 /// Builder for the `find_email_v2` API call.
 /// 
@@ -113,6 +113,30 @@ impl ZeroBounce {
 
         let activity_data = from_str::<ActivityData>(&response_content)?;
         Ok(activity_data)
+    }
+
+    pub fn score_email(&self, email: &str) -> ZBResult<ScoreEmailResponse> {
+        let query_args = HashMap::from([("email", email)]);
+
+        let response_content = self.generic_get_request(
+            self.url_provider.url_of(ENDPOINT_SCORING),
+            query_args,
+        )?;
+
+        let score = from_str::<ScoreEmailResponse>(&response_content)?;
+        Ok(score)
+    }
+
+    pub fn score_email_post(&self, email: &str) -> ZBResult<ScoreEmailResponse> {
+        let form_args = HashMap::from([("email", email)]);
+
+        let response_content = self.generic_form_post_request(
+            self.url_provider.url_of(ENDPOINT_SCORING),
+            form_args,
+        )?;
+
+        let score = from_str::<ScoreEmailResponse>(&response_content)?;
+        Ok(score)
     }
 
     /// Deprecated: Use `find_email_v2` instead.

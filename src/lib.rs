@@ -122,6 +122,28 @@ impl ZeroBounce {
 
         Ok(response_content)
     }
+
+    fn generic_form_post_request<'a>(
+        &'a self,
+        url: String,
+        mut form_args: HashMap<&'a str, &'a str>,
+    ) -> ZBResult<String> {
+        form_args.insert("api_key", self.api_key.as_str());
+
+        let response = self.client.post(url).form(&form_args).send()?;
+
+        let response_ok = response.status().is_success();
+        let response_content = response.text()?;
+        if response_content.len() > utility::MAX_JSON_RESPONSE_BYTES {
+            return Err(ZBError::ExplicitError("response body exceeds size limit".into()));
+        }
+
+        if !response_ok {
+            return Err(ZBError::ExplicitError(response_content));
+        }
+
+        Ok(response_content)
+    }
 }
 
 fn require_https_url(url: String) -> String {
