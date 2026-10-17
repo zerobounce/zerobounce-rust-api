@@ -15,6 +15,8 @@ pub struct ZBValidation {
     pub account: Option<String>,
     pub domain: Option<String>,
     pub domain_age_days: Option<String>,
+    pub active_in_days: Option<String>,
+    pub active_first_seen: Option<String>,
     pub smtp_provider: Option<String>,
     pub catchall_domain: Option<bool>,
     pub mx_record: Option<String>,

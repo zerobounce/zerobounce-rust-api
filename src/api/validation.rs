@@ -7,21 +7,45 @@ use serde_json::{Map as SerdeMap, Value};
 use crate::{ZeroBounce,  ZBResult};
 use crate::utility::{ENDPOINT_VALIDATE, ZBError, ENDPOINT_BATCH_VALIDATE, CONTENT_TYPE_JSON};
 use crate::utility::structures::validation::{ZBValidation, ZBBatchValidation};
+use crate::utility::structures::validate_options::ZBValidateOptions;
 
 
 impl ZeroBounce {
 
     pub fn validate_email_and_ip(&self, email: &str, ip_address: &str) -> ZBResult<ZBValidation> {
-        let mut query_args = HashMap::from([
-            ("email", email),
-        ]);
+        self.validate_email_with_options(email, ip_address, &ZBValidateOptions::default())
+    }
+
+    pub fn validate_email_with_options(
+        &self,
+        email: &str,
+        ip_address: &str,
+        options: &ZBValidateOptions,
+    ) -> ZBResult<ZBValidation> {
+        let mut query_args = HashMap::from([("email", email)]);
+        let timeout_param;
+        let activity_param;
+        let verify_param;
 
         if !ip_address.is_empty() {
             query_args.insert("ip_address", ip_address);
         }
+        if let Some(timeout) = options.timeout {
+            timeout_param = timeout.to_string();
+            query_args.insert("timeout", &timeout_param);
+        }
+        if let Some(activity_data) = options.activity_data {
+            activity_param = if activity_data { "true" } else { "false" };
+            query_args.insert("activity_data", activity_param);
+        }
+        if let Some(verify_plus) = options.verify_plus {
+            verify_param = if verify_plus { "true" } else { "false" };
+            query_args.insert("verify_plus", verify_param);
+        }
 
         let response_content = self.generic_get_request(
-            self.url_provider.url_of(ENDPOINT_VALIDATE), query_args
+            self.url_provider.url_of(ENDPOINT_VALIDATE),
+            query_args,
         )?;
 
         let validation = from_str::<ZBValidation>(&response_content)?;
@@ -47,7 +71,11 @@ impl ZeroBounce {
     // }
     // ```
     // After the value is built, serialize and return the resulted string.
-    fn batch_validate_prepare_body(&self, emails_and_ip_addresses: Vec<(String, String)>) -> ZBResult<String> {
+    fn batch_validate_prepare_body(
+        &self,
+        emails_and_ip_addresses: Vec<(String, String)>,
+        options: &ZBValidateOptions,
+    ) -> ZBResult<String> {
         let email_batch = emails_and_ip_addresses
             .into_iter()
             .map(|(email, ip_address)|
@@ -60,10 +88,19 @@ impl ZeroBounce {
             .map(Value::Object)
             .collect::<Vec<Value>>();
 
-        let request_body_map = SerdeMap::from_iter([
+        let mut request_body_map = SerdeMap::from_iter([
             ("api_key".to_string(), Value::String(self.api_key.clone())),
             ("email_batch".to_string(), Value::Array(email_batch)),
         ]);
+        if let Some(timeout) = options.timeout {
+            request_body_map.insert("timeout".to_string(), Value::Number(timeout.into()));
+        }
+        if let Some(activity_data) = options.activity_data {
+            request_body_map.insert("activity_data".to_string(), Value::Bool(activity_data));
+        }
+        if let Some(verify_plus) = options.verify_plus {
+            request_body_map.insert("verify_plus".to_string(), Value::Bool(verify_plus));
+        }
 
         // let request_body_object = Value::Object(request_body_map);
         let mut serializer = serde_json::Serializer::new(Vec::new());
@@ -78,7 +115,15 @@ impl ZeroBounce {
     }
 
     pub fn batch_validate(&self, emails_and_ip_addresses: Vec<(String, String)>) -> ZBResult<ZBBatchValidation> {
-        let body_content = self.batch_validate_prepare_body(emails_and_ip_addresses)?;
+        self.batch_validate_with_options(emails_and_ip_addresses, &ZBValidateOptions::default())
+    }
+
+    pub fn batch_validate_with_options(
+        &self,
+        emails_and_ip_addresses: Vec<(String, String)>,
+        options: &ZBValidateOptions,
+    ) -> ZBResult<ZBBatchValidation> {
+        let body_content = self.batch_validate_prepare_body(emails_and_ip_addresses, options)?;
         let url = self.url_provider.url_of(ENDPOINT_BATCH_VALIDATE);
 
         let response = self.client.post(url)
@@ -112,7 +157,7 @@ mod test {
         ];
 
         let body_result = ZeroBounce::new("some_api_key")
-            .batch_validate_prepare_body(emails_and_ip_addresses);
+            .batch_validate_prepare_body(emails_and_ip_addresses, &crate::utility::structures::validate_options::ZBValidateOptions::default());
 
         assert!(body_result.is_ok())
     }
