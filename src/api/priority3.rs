@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::Read;
 
 use reqwest::blocking::multipart::{Form, Part};
+use serde::Deserialize;
 use serde_json::{from_str, Value};
 
 use crate::ZeroBounce;
@@ -58,6 +59,13 @@ fn post_bulk_root_form(
         return Err(ZBError::ExplicitError(body));
     }
     Ok(from_str(&body)?)
+}
+
+#[derive(Deserialize, Debug)]
+pub struct S3ListFileEntry {
+    pub name: String,
+    pub size: i64,
+    pub last_modified: String,
 }
 
 fn bulk_root_file_status(client: &ZeroBounce, base: &str, file_id: &str) -> ZBResult<String> {
@@ -209,6 +217,30 @@ impl ZeroBounce {
                 ("value", value),
             ]),
         )?;
+        Ok(from_str(&body)?)
+    }
+
+    pub fn list_s3_files(
+        &self,
+        bucket: Option<&str>,
+        search: Option<&str>,
+    ) -> ZBResult<Vec<S3ListFileEntry>> {
+        let url = format!(
+            "{}/listS3files",
+            bulk_api_root(&self.url_provider.bulk_url)
+        );
+        let mut params: HashMap<&str, &str> = HashMap::new();
+        if let Some(bucket) = bucket {
+            if !bucket.trim().is_empty() {
+                params.insert("bucket", bucket);
+            }
+        }
+        if let Some(search) = search {
+            if !search.trim().is_empty() {
+                params.insert("search", search);
+            }
+        }
+        let body = self.generic_get_request(url, params)?;
         Ok(from_str(&body)?)
     }
 

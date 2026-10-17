@@ -43,10 +43,36 @@ impl ZeroBounce {
             query_args.insert("verify_plus", verify_param);
         }
 
-        let response_content = self.generic_get_request(
-            self.url_provider.url_of(ENDPOINT_VALIDATE),
-            query_args,
-        )?;
+        let response_content = if options.use_post {
+            let mut form_args = HashMap::from([("email", email)]);
+            let timeout_param;
+            let activity_param;
+            let verify_param;
+            if !ip_address.is_empty() {
+                form_args.insert("ip_address", ip_address);
+            }
+            if let Some(timeout) = options.timeout {
+                timeout_param = timeout.to_string();
+                form_args.insert("timeout", &timeout_param);
+            }
+            if let Some(activity_data) = options.activity_data {
+                activity_param = if activity_data { "true" } else { "false" };
+                form_args.insert("activity_data", activity_param);
+            }
+            if let Some(verify_plus) = options.verify_plus {
+                verify_param = if verify_plus { "true" } else { "false" };
+                form_args.insert("verify_plus", verify_param);
+            }
+            self.generic_form_post_request(
+                self.url_provider.url_of(ENDPOINT_VALIDATE),
+                form_args,
+            )?
+        } else {
+            self.generic_get_request(
+                self.url_provider.url_of(ENDPOINT_VALIDATE),
+                query_args,
+            )?
+        };
 
         let validation = from_str::<ZBValidation>(&response_content)?;
         Ok(validation)
