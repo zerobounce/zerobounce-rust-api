@@ -7,4 +7,7 @@ WORKDIR /app
 COPY . .
 
 # Full test suite (unit + integration; network allowed in container)
+
+USER 65532:65532
+
 CMD ["cargo", "test", "--no-fail-fast"]

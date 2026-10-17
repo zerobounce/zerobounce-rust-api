@@ -112,6 +112,9 @@ impl ZeroBounce {
 
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
+        if response_content.len() > utility::MAX_JSON_RESPONSE_BYTES {
+            return Err(ZBError::ExplicitError("response body exceeds size limit".into()));
+        }
 
         if !response_ok {
             return Err(ZBError::ExplicitError(response_content));
@@ -126,11 +129,16 @@ fn require_https_url(url: String) -> String {
     if lower.starts_with("https://") {
         return url;
     }
-    // mockito and local tests use loopback HTTP
-    if lower.starts_with("http://127.0.0.1")
-        || lower.starts_with("http://localhost")
-        || lower.starts_with("http://[::1]")
-    {
+    let is_loopback_http = reqwest::Url::parse(&url)
+        .map(|parsed| {
+            parsed.scheme() == "http"
+                && matches!(
+                    parsed.host_str(),
+                    Some("127.0.0.1") | Some("localhost") | Some("[::1]")
+                )
+        })
+        .unwrap_or(false);
+    if is_loopback_http {
         return url;
     }
     panic!("base_url must be an https:// URL");
@@ -160,5 +168,17 @@ mod security_tests {
     #[should_panic(expected = "https://")]
     fn rejects_remote_http() {
         require_https_url("http://evil.example/v2/".to_string());
+    }
+
+    #[test]
+    #[should_panic(expected = "https://")]
+    fn rejects_loopback_lookalike_host() {
+        require_https_url("http://localhost.evil.example/v2/".to_string());
+    }
+
+    #[test]
+    #[should_panic(expected = "https://")]
+    fn rejects_loopback_userinfo_trick() {
+        require_https_url("http://127.0.0.1@evil.example/v2/".to_string());
     }
 }
