@@ -8,6 +8,10 @@ pub use bulk_get_file::{format_get_file_error_message, get_file_json_indicates_e
 
 pub const CONTENT_TYPE_JSON: &str = "application/json";
 pub const CONTENT_TYPE_STREAM: &str = "application/octet-stream";
+/// Cap JSON API responses so error pages cannot exhaust memory (RS-05).
+pub const MAX_JSON_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+/// Cap bulk getfile downloads (still large enough for typical CSV exports).
+pub const MAX_GETFILE_BYTES: usize = 256 * 1024 * 1024;
 
 /// Enum representing the available API base URLs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,8 +120,29 @@ impl ZBError {
 //
 // This automatic conversion is expected when using the client
 // and issuing http requests.
+fn redact_api_key(url: &mut reqwest::Url) {
+    if !url.query_pairs().any(|(key, _)| key == "api_key") {
+        return;
+    }
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .map(|(key, value)| {
+            let value = if key == "api_key" {
+                "REDACTED".to_string()
+            } else {
+                value.into_owned()
+            };
+            (key.into_owned(), value)
+        })
+        .collect();
+    url.query_pairs_mut().clear().extend_pairs(pairs);
+}
+
 impl From<reqwest::Error> for ZBError {
-    fn from(value: reqwest::Error) -> ZBError {
+    fn from(mut value: reqwest::Error) -> ZBError {
+        if let Some(url) = value.url_mut() {
+            redact_api_key(url);
+        }
         ZBError::RequestError(value)
     }
 }

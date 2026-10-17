@@ -31,12 +31,6 @@ impl ZeroBounce {
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
 
-        // Debug: Print raw response to examine structure in debug mode
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("Raw API response: {}", response_content);
-        }
-
         if !response_ok {
             return Err(ZBError::ExplicitError(response_content));
         }
@@ -93,12 +87,10 @@ impl ZeroBounce {
             .to_string();
 
         let body_bytes = response.bytes()?;
-        let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
-
-        #[cfg(debug_assertions)]
-        if !status.is_success() || should_treat_get_file_body_as_error(&body_str, &content_type) {
-            eprintln!("Raw API response: {}", body_str);
+        if body_bytes.len() > crate::utility::MAX_GETFILE_BYTES {
+            return Err(ZBError::ExplicitError("getfile response exceeds size limit".into()));
         }
+        let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
 
         if !status.is_success() {
             let msg = if body_str.trim_start().starts_with('{') {
