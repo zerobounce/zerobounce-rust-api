@@ -3,7 +3,7 @@ use zero_bounce::{ZBUrlProvider, ZeroBounce, ZBFile};
 
 pub(crate) const EMAIL: &str = "example@example.com";
 pub(crate) const MOCK_API_KEY: &str = "mock_api_key";
-pub(crate) const INVALID_URL: &str = "http://255.255.255.255";
+pub(crate) const INVALID_URL: &str = "https://255.255.255.255";
 pub(crate) const SANDBOX_IP: &str = "99.110.204.1";
 
 pub(crate) fn instantiate<'s>() -> (ServerGuard, ZeroBounce) {

@@ -108,7 +108,7 @@ impl ZeroBounce {
         // Automatically add api_key to query arguments
         query_args.insert("api_key", self.api_key.as_str());
         
-        let response = self.client.get(url).query(&query_args).send()?;
+        let response = self.client.get(parse_request_url(&url)?).query(&query_args).send()?;
 
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
@@ -130,7 +130,7 @@ impl ZeroBounce {
     ) -> ZBResult<String> {
         form_args.insert("api_key", self.api_key.as_str());
 
-        let response = self.client.post(url).form(&form_args).send()?;
+        let response = self.client.post(parse_request_url(&url)?).form(&form_args).send()?;
 
         let response_ok = response.status().is_success();
         let response_content = response.text()?;
@@ -144,6 +144,20 @@ impl ZeroBounce {
 
         Ok(response_content)
     }
+}
+
+fn parse_request_url(url: &str) -> ZBResult<reqwest::Url> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| ZBError::ExplicitError(e.to_string()))?;
+    if parsed.scheme() == "https" {
+        return Ok(parsed);
+    }
+    if parsed.scheme() == "http" {
+        match parsed.host_str() {
+            Some("127.0.0.1") | Some("localhost") | Some("[::1]") => return Ok(parsed),
+            _ => {}
+        }
+    }
+    Err(ZBError::ExplicitError("request URL must use https://".into()))
 }
 
 fn require_https_url(url: String) -> String {

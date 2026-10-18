@@ -152,7 +152,7 @@ impl ZeroBounce {
         let body_content = self.batch_validate_prepare_body(emails_and_ip_addresses, options)?;
         let url = self.url_provider.url_of(ENDPOINT_BATCH_VALIDATE);
 
-        let response = self.client.post(url)
+        let response = self.client.post(crate::parse_request_url(&url)?)
             .body(body_content)
             .header("content-type", CONTENT_TYPE_JSON)
             .send()?;
