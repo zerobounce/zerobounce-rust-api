@@ -4,14 +4,14 @@ pub mod utility;
 use std::collections::HashMap;
 use std::time::Duration;
 
-pub use crate::utility::{ZBError, ZBResult, ApiBaseUrl};
-pub use crate::utility::structures::{ActivityData, ApiUsage};
+pub use crate::api::{DomainSearchV2Builder, FindEmailV2Builder};
 pub use crate::utility::structures::bulk::{
-    zb_download_type, ZBFile, ZBFileFeedback, ZBFileStatus, ZBBulkResponse, ZBGetFileOptions,
+    zb_download_type, ZBBulkResponse, ZBFile, ZBFileFeedback, ZBFileStatus, ZBGetFileOptions,
 };
-pub use crate::utility::{format_get_file_error_message, get_file_json_indicates_error};
 pub use crate::utility::structures::validate_enums::{ZBValidateStatus, ZBValidateSubStatus};
-pub use crate::api::{FindEmailV2Builder, DomainSearchV2Builder};
+pub use crate::utility::structures::{ActivityData, ApiUsage};
+pub use crate::utility::{format_get_file_error_message, get_file_json_indicates_error};
+pub use crate::utility::{ApiBaseUrl, ZBError, ZBResult};
 
 // Structure meant to generate the URLs to be accessed with the HTTP requests
 // based on the base API URLs (for the base API and bulk API).
@@ -50,14 +50,14 @@ pub struct ZeroBounce {
 // the project.
 impl ZeroBounce {
     /// Create a new ZeroBounce client instance with the default API URL.
-    /// 
+    ///
     /// # Arguments
     /// * `api_key` - Your ZeroBounce API key
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use zero_bounce::ZeroBounce;
-    /// 
+    ///
     /// let zb = ZeroBounce::new("your_api_key");
     /// ```
     pub fn new(api_key: &str) -> ZeroBounce {
@@ -65,7 +65,7 @@ impl ZeroBounce {
     }
 
     /// Create a new ZeroBounce client instance with a custom base URL.
-    /// 
+    ///
     /// # Arguments
     /// * `api_key` - Your ZeroBounce API key
     /// * `base_url` - Base URL. Can be:
@@ -73,54 +73,79 @@ impl ZeroBounce {
     ///   - `ApiBaseUrl::USA` - Uses the USA API URL
     ///   - `ApiBaseUrl::EU` - Uses the EU API URL
     ///   - `String` or `&str` - Uses a custom URL string
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use zero_bounce::{ZeroBounce, ApiBaseUrl};
-    /// 
+    ///
     /// // Using enum
     /// let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::USA);
-    /// 
+    ///
     /// // Using custom string
     /// let zb = ZeroBounce::with_base_url("your_api_key", "https://custom-api.example.com/v2/");
     /// ```
-    pub fn with_base_url<T>(api_key: &str, base_url: T) -> ZeroBounce 
+    pub fn with_base_url<T>(api_key: &str, base_url: T) -> ZeroBounce
     where
         T: Into<String>,
     {
         let base_url_string = require_https_url(base_url.into());
-        
-        let mut url_provider = ZBUrlProvider::default();
-        url_provider.url = base_url_string.clone();
-        
+
+        let url_provider = ZBUrlProvider {
+            url: base_url_string.clone(),
+            ..ZBUrlProvider::default()
+        };
+
         ZeroBounce {
             api_key: api_key.to_string(),
             base_url: base_url_string,
             client: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(120))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap_or_else(|_| reqwest::blocking::Client::default()),
             url_provider,
         }
     }
 
-    fn generic_get_request<'a>(&'a self, url: String, mut query_args: HashMap<&'a str, &'a str>) -> ZBResult<String> {
-        // Automatically add api_key to query arguments
-        query_args.insert("api_key", self.api_key.as_str());
-        
-        let response = self.client.get(parse_request_url(&url)?).query(&query_args).send()?;
+    fn require_key(&self) -> ZBResult<()> {
+        if self.api_key.trim().is_empty() {
+            return Err(ZBError::explicit("api_key is required"));
+        }
+        Ok(())
+    }
 
-        let response_ok = response.status().is_success();
+    fn read_api_response(&self, response: reqwest::blocking::Response) -> ZBResult<String> {
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
         let response_content = response.text()?;
         if response_content.len() > utility::MAX_JSON_RESPONSE_BYTES {
-            return Err(ZBError::ExplicitError("response body exceeds size limit".into()));
+            return Err(ZBError::ExplicitError(
+                "response body exceeds size limit".into(),
+            ));
         }
-
-        if !response_ok {
-            return Err(ZBError::ExplicitError(response_content));
-        }
-
+        utility::http_error::ensure_json_api_body(status, &content_type, &response_content)?;
         Ok(response_content)
+    }
+
+    fn generic_get_request<'a>(
+        &'a self,
+        url: String,
+        mut query_args: HashMap<&'a str, &'a str>,
+    ) -> ZBResult<String> {
+        self.require_key()?;
+        query_args.insert("api_key", self.api_key.as_str());
+
+        let response = self
+            .client
+            .get(parse_request_url(&url)?)
+            .query(&query_args)
+            .send()?;
+        self.read_api_response(response)
     }
 
     fn generic_form_post_request<'a>(
@@ -128,21 +153,15 @@ impl ZeroBounce {
         url: String,
         mut form_args: HashMap<&'a str, &'a str>,
     ) -> ZBResult<String> {
+        self.require_key()?;
         form_args.insert("api_key", self.api_key.as_str());
 
-        let response = self.client.post(parse_request_url(&url)?).form(&form_args).send()?;
-
-        let response_ok = response.status().is_success();
-        let response_content = response.text()?;
-        if response_content.len() > utility::MAX_JSON_RESPONSE_BYTES {
-            return Err(ZBError::ExplicitError("response body exceeds size limit".into()));
-        }
-
-        if !response_ok {
-            return Err(ZBError::ExplicitError(response_content));
-        }
-
-        Ok(response_content)
+        let response = self
+            .client
+            .post(parse_request_url(&url)?)
+            .form(&form_args)
+            .send()?;
+        self.read_api_response(response)
     }
 }
 
@@ -157,7 +176,9 @@ fn parse_request_url(url: &str) -> ZBResult<reqwest::Url> {
             _ => {}
         }
     }
-    Err(ZBError::ExplicitError("request URL must use https://".into()))
+    Err(ZBError::ExplicitError(
+        "request URL must use https://".into(),
+    ))
 }
 
 fn require_https_url(url: String) -> String {

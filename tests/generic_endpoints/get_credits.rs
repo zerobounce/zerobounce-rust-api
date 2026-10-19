@@ -29,9 +29,9 @@ fn test_credits_invalid_json() {
     mock.assert();
 
     let credits_error = credits.unwrap_err();
-    let ZBError::JsonError(_) = credits_error else {
-        panic!("unexpected error: {:#?}", credits_error);
-    };
+    let message = credits_error.to_string();
+    assert!(message.len() < 500, "{message}");
+    assert!(!message.contains("expected"), "{message}");
 }
 
 #[test]

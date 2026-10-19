@@ -1,0 +1,86 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- `ZBValidateOptions` for single validation: `timeout`, `activity_data`, `verify_plus`, and `use_post` (form-encoded `POST /v2/validate`). The same options apply to `batch_validate_with_options`.
+- `score_email` (`GET /v2/scoring`) and `score_email_post` (form-encoded `POST /v2/scoring`).
+- Bulk email finder, bulk domain search, list evaluator, filters, and S3 bulk (`validate_s3_file`, `score_s3_file`, `export_s3_file`, `list_s3_files`).
+
+### Changed
+
+- API requests time out after 120 seconds and do not follow redirects.
+- A base URL must be `https://`, except `http://127.0.0.1`, `http://localhost`, and `http://[::1]` for tests.
+
+### Fixed
+
+- An HTML "Access denied" page is returned as a short `ZBError`. An HTML page with status 200 is an error as well, including bulk `getfile`, instead of file bytes or a JSON parse.
+- Empty and non-JSON bodies are a short error. The message is no longer a serde parse dump, and a repeated `Error:` / `[Error]:` prefix is removed.
+- `batch_validate` returns an error for an account-level failure (HTTP 200, error for address `all`, such as an invalid API key or no credits). An error for one address stays on the successful result.
+- AI scoring `sendfile` does not send name, gender, or IP columns, or `allow_phase_2`.
+- An empty API key is rejected before a request is sent.
+- `validate` timeout must be 3–60 seconds. `batch_validate` timeout must be 10–120 seconds.
+
+### Security
+
+- Redirects are disabled, so a 3xx response cannot send the API key to another host.
+- Error values no longer include the raw HTML access-denied page.
+
+## [2.1.2] - 2026-06-10
+
+### Added
+
+- `catchall_domain` on the validation response.
+
+## [2.1.0] - 2026-04-05
+
+### Added
+
+- `ZBGetFileOptions` with `download_type` and `activity_data` (validation getfile only).
+
+### Fixed
+
+- Bulk getfile treats a JSON error body, including HTTP 200, as a failure instead of file content.
+
+## [2.0.11] - 2026-03-03
+
+### Changed
+
+- License the project under MIT.
+
+## [2.0.0] - 2026-03-03
+
+### Changed
+
+- Release the 2.0 line of the client.
+
+## [1.3.0] - 2025-11-10
+
+### Added
+
+- `accept_all` status.
+- Base URL selection (`ApiBaseUrl::Default`, `USA`, and `EU`).
+
+### Deprecated
+
+- `domain_search`. Use `domain_search_v2`.
+
+## [1.1.0] - 2023-09-04
+
+### Added
+
+- Initial client for validation, credits, activity, and bulk file calls.
+
+[Unreleased]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.1.3...HEAD
+[2.1.2]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.1.0...v2.1.2
+[2.1.0]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.0.11...v2.1.0
+[2.0.11]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.0.0...v2.0.11
+[2.0.0]: https://github.com/zerobounce/zerobounce-rust-api/compare/v1.3.0...v2.0.0
+[1.3.0]: https://github.com/zerobounce/zerobounce-rust-api/compare/v1.1.0...v1.3.0
+[1.1.0]: https://github.com/zerobounce/zerobounce-rust-api/releases/tag/v1.1.0

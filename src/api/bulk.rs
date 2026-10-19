@@ -1,20 +1,26 @@
 use std::collections::HashMap;
 
-use serde_json::from_str;
-
-use crate::ZeroBounce;
-use crate::utility::{ZBResult, ZBError};
-use crate::utility::{ENDPOINT_FILE_SEND, ENDPOINT_FILE_STATUS, ENDPOINT_FILE_RESULT, ENDPOINT_FILE_DELETE};
-use crate::utility::{ENDPOINT_SCORING_DELETE, ENDPOINT_SCORING_STATUS, ENDPOINT_SCORING_RESULT, ENDPOINT_SCORING_SEND};
-use crate::utility::structures::bulk::{ZBBulkResponse, ZBFile, ZBFileFeedback, ZBFileStatus, ZBGetFileOptions};
 use crate::utility::bulk_get_file::should_treat_get_file_body_as_error;
 use crate::utility::format_get_file_error_message;
-
+use crate::utility::structures::bulk::{
+    ZBBulkResponse, ZBFile, ZBFileFeedback, ZBFileStatus, ZBGetFileOptions,
+};
+use crate::utility::{ZBError, ZBResult};
+use crate::utility::{
+    ENDPOINT_FILE_DELETE, ENDPOINT_FILE_RESULT, ENDPOINT_FILE_SEND, ENDPOINT_FILE_STATUS,
+};
+use crate::utility::{
+    ENDPOINT_SCORING_DELETE, ENDPOINT_SCORING_RESULT, ENDPOINT_SCORING_SEND,
+    ENDPOINT_SCORING_STATUS,
+};
+use crate::ZeroBounce;
 
 impl ZeroBounce {
-
     fn generic_file_submit(&self, endpoint: &str, zb_file: &ZBFile) -> ZBResult<ZBFileFeedback> {
-        let mut multi_part_form = zb_file.generate_multipart()?
+        self.require_key()?;
+        let include_person_columns = endpoint == ENDPOINT_FILE_SEND;
+        let mut multi_part_form = zb_file
+            .generate_multipart_with(include_person_columns)?
             .text("api_key", self.api_key.clone());
 
         if endpoint == ENDPOINT_FILE_SEND {
@@ -24,32 +30,19 @@ impl ZeroBounce {
         }
 
         let url = self.url_provider.bulk_url_of(endpoint);
-        let response = self.client.post(url)
-            .multipart(multi_part_form)
-            .send()?;
+        let response = self.client.post(url).multipart(multi_part_form).send()?;
 
-        let response_ok = response.status().is_success();
-        let response_content = response.text()?;
-
-        if !response_ok {
-            return Err(ZBError::ExplicitError(response_content));
-        }
-
-        let feedback_object = from_str::<ZBFileFeedback>(&response_content)?;
-        Ok(feedback_object)
+        let response_content = self.read_api_response(response)?;
+        crate::utility::http_error::parse_json_body(&response_content)
     }
 
     fn generic_file_status_check(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileStatus> {
-        let query_args = HashMap::from([
-            ("file_id", file_id),
-        ]);
+        let query_args = HashMap::from([("file_id", file_id)]);
 
-        let response_content = self.generic_get_request(
-            self.url_provider.bulk_url_of(endpoint), query_args
-        )?;
+        let response_content =
+            self.generic_get_request(self.url_provider.bulk_url_of(endpoint), query_args)?;
 
-        let file_status = from_str::<ZBFileStatus>(&response_content)?;
-        Ok(file_status)
+        crate::utility::http_error::parse_json_body(&response_content)
     }
 
     fn generic_result_fetch(
@@ -59,6 +52,7 @@ impl ZeroBounce {
         options: Option<&ZBGetFileOptions>,
         is_scoring: bool,
     ) -> ZBResult<ZBBulkResponse> {
+        self.require_key()?;
         let url = self.url_provider.bulk_url_of(endpoint);
         let mut query: Vec<(&str, String)> = vec![
             ("api_key", self.api_key.clone()),
@@ -70,7 +64,10 @@ impl ZeroBounce {
             }
             if !is_scoring {
                 if let Some(ad) = opts.activity_data {
-                    query.push(("activity_data", if ad { "true".into() } else { "false".into() }));
+                    query.push((
+                        "activity_data",
+                        if ad { "true".into() } else { "false".into() },
+                    ));
                 }
             }
         }
@@ -88,39 +85,54 @@ impl ZeroBounce {
 
         let body_bytes = response.bytes()?;
         if body_bytes.len() > crate::utility::MAX_GETFILE_BYTES {
-            return Err(ZBError::ExplicitError("getfile response exceeds size limit".into()));
+            return Err(ZBError::ExplicitError(
+                "getfile response exceeds size limit".into(),
+            ));
         }
         let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
 
-        if !status.is_success() {
-            let msg = if body_str.trim_start().starts_with('{') {
-                format_get_file_error_message(body_str.trim())
-            } else if body_str.is_empty() {
-                format!("HTTP {}", status.as_u16())
-            } else {
-                body_str
-            };
-            return Err(ZBError::ExplicitError(msg));
+        if crate::utility::http_error::body_looks_like_html(&body_str)
+            || crate::utility::http_error::content_type_is_html(&content_type)
+            || !status.is_success()
+        {
+            return Err(ZBError::ExplicitError(
+                crate::utility::http_error::message_from_body(
+                    status.as_u16(),
+                    &content_type,
+                    &body_str,
+                ),
+            ));
         }
 
         if should_treat_get_file_body_as_error(&body_str, &content_type) {
-            return Err(ZBError::ExplicitError(format_get_file_error_message(body_str.trim())));
+            let message = crate::utility::http_error::strip_error_prefix(
+                &format_get_file_error_message(body_str.trim()),
+            );
+            if message.is_empty()
+                || message.len() > 500
+                || crate::utility::http_error::body_looks_like_html(&message)
+            {
+                return Err(ZBError::ExplicitError(
+                    crate::utility::http_error::message_from_body(
+                        status.as_u16(),
+                        &content_type,
+                        &body_str,
+                    ),
+                ));
+            }
+            return Err(ZBError::ExplicitError(message));
         }
 
         Ok(ZBBulkResponse::Content(body_bytes))
     }
 
-    fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback>{
-        let query_args = HashMap::from([
-            ("file_id", file_id),
-        ]);
+    fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback> {
+        let query_args = HashMap::from([("file_id", file_id)]);
 
-        let response_content = self.generic_get_request(
-            self.url_provider.bulk_url_of(endpoint), query_args
-        )?;
+        let response_content =
+            self.generic_get_request(self.url_provider.bulk_url_of(endpoint), query_args)?;
 
-        let file_status = from_str::<ZBFileFeedback>(&response_content)?;
-        Ok(file_status)
+        crate::utility::http_error::parse_json_body(&response_content)
     }
 
     pub fn bulk_validation_file_submit(&self, zb_file: &ZBFile) -> ZBResult<ZBFileFeedback> {
@@ -172,6 +184,4 @@ impl ZeroBounce {
     pub fn ai_scoring_result_delete(&self, file_id: &str) -> ZBResult<ZBFileFeedback> {
         self.generic_result_delete(ENDPOINT_SCORING_DELETE, file_id)
     }
-
-
 }

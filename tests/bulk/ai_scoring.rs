@@ -23,9 +23,9 @@ fn test_ai_scoring_submit_invalid_json() {
     assert!(response.is_err());
 
     let zb_error = response.unwrap_err();
-    let ZBError::JsonError(_) = zb_error else {
-        panic!("unexpected error: {:#?}", zb_error);
-    };
+    let message = zb_error.to_string();
+    assert!(message.len() < 500, "{message}");
+    assert!(!message.contains("expected"), "{message}");
 }
 
 #[test]
@@ -79,9 +79,9 @@ fn test_ai_scoring_status_invalid_json() {
     assert!(response.is_err());
 
     let zb_error = response.unwrap_err();
-    let ZBError::JsonError(_) = zb_error else {
-        panic!("unexpected error: {:#?}", zb_error);
-    };
+    let message = zb_error.to_string();
+    assert!(message.len() < 500, "{message}");
+    assert!(!message.contains("expected"), "{message}");
 }
 
 #[test]
@@ -217,9 +217,9 @@ fn test_ai_scoring_delete_invalid_json() {
     assert!(response.is_err());
 
     let zb_error = response.unwrap_err();
-    let ZBError::JsonError(_) = zb_error else {
-        panic!("unexpected error: {:#?}", zb_error);
-    };
+    let message = zb_error.to_string();
+    assert!(message.len() < 500, "{message}");
+    assert!(!message.contains("expected"), "{message}");
 }
 
 #[test]

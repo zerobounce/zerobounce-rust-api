@@ -1,17 +1,14 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
-use serde_json::from_str;
 use serde_json::{Map as SerdeMap, Value};
 
-use crate::{ZeroBounce,  ZBResult};
-use crate::utility::{ENDPOINT_VALIDATE, ZBError, ENDPOINT_BATCH_VALIDATE, CONTENT_TYPE_JSON};
-use crate::utility::structures::validation::{ZBValidation, ZBBatchValidation};
 use crate::utility::structures::validate_options::ZBValidateOptions;
-
+use crate::utility::structures::validation::{ZBBatchValidation, ZBValidation};
+use crate::utility::{ZBError, CONTENT_TYPE_JSON, ENDPOINT_BATCH_VALIDATE, ENDPOINT_VALIDATE};
+use crate::{ZBResult, ZeroBounce};
 
 impl ZeroBounce {
-
     pub fn validate_email_and_ip(&self, email: &str, ip_address: &str) -> ZBResult<ZBValidation> {
         self.validate_email_with_options(email, ip_address, &ZBValidateOptions::default())
     }
@@ -22,6 +19,13 @@ impl ZeroBounce {
         ip_address: &str,
         options: &ZBValidateOptions,
     ) -> ZBResult<ZBValidation> {
+        if let Some(timeout) = options.timeout {
+            if !(3..=60).contains(&timeout) {
+                return Err(ZBError::explicit(
+                    "Invalid parameter: timeout (must be between 3 and 60 seconds)",
+                ));
+            }
+        }
         let mut query_args = HashMap::from([("email", email)]);
         let timeout_param;
         let activity_param;
@@ -63,19 +67,12 @@ impl ZeroBounce {
                 verify_param = if verify_plus { "true" } else { "false" };
                 form_args.insert("verify_plus", verify_param);
             }
-            self.generic_form_post_request(
-                self.url_provider.url_of(ENDPOINT_VALIDATE),
-                form_args,
-            )?
+            self.generic_form_post_request(self.url_provider.url_of(ENDPOINT_VALIDATE), form_args)?
         } else {
-            self.generic_get_request(
-                self.url_provider.url_of(ENDPOINT_VALIDATE),
-                query_args,
-            )?
+            self.generic_get_request(self.url_provider.url_of(ENDPOINT_VALIDATE), query_args)?
         };
 
-        let validation = from_str::<ZBValidation>(&response_content)?;
-        Ok(validation)
+        crate::utility::http_error::parse_json_body(&response_content)
     }
 
     pub fn validate_email(&self, email: &str) -> ZBResult<ZBValidation> {
@@ -104,12 +101,12 @@ impl ZeroBounce {
     ) -> ZBResult<String> {
         let email_batch = emails_and_ip_addresses
             .into_iter()
-            .map(|(email, ip_address)|
+            .map(|(email, ip_address)| {
                 [
                     ("email_address".to_string(), Value::String(email)),
                     ("ip_address".to_string(), Value::String(ip_address)),
                 ]
-            )
+            })
             .map(SerdeMap::<String, Value>::from_iter)
             .map(Value::Object)
             .collect::<Vec<Value>>();
@@ -140,7 +137,10 @@ impl ZeroBounce {
         Ok(final_string)
     }
 
-    pub fn batch_validate(&self, emails_and_ip_addresses: Vec<(String, String)>) -> ZBResult<ZBBatchValidation> {
+    pub fn batch_validate(
+        &self,
+        emails_and_ip_addresses: Vec<(String, String)>,
+    ) -> ZBResult<ZBBatchValidation> {
         self.batch_validate_with_options(emails_and_ip_addresses, &ZBValidateOptions::default())
     }
 
@@ -149,26 +149,40 @@ impl ZeroBounce {
         emails_and_ip_addresses: Vec<(String, String)>,
         options: &ZBValidateOptions,
     ) -> ZBResult<ZBBatchValidation> {
+        if let Some(timeout) = options.timeout {
+            if !(10..=120).contains(&timeout) {
+                return Err(ZBError::explicit(
+                    "Invalid parameter: timeout (must be between 10 and 120 seconds)",
+                ));
+            }
+        }
+        self.require_key()?;
         let body_content = self.batch_validate_prepare_body(emails_and_ip_addresses, options)?;
         let url = self.url_provider.url_of(ENDPOINT_BATCH_VALIDATE);
 
-        let response = self.client.post(crate::parse_request_url(&url)?)
+        let response = self
+            .client
+            .post(crate::parse_request_url(&url)?)
             .body(body_content)
             .header("content-type", CONTENT_TYPE_JSON)
             .send()?;
 
-        let response_ok = response.status().is_success();
-        let response_content = response.text()?;
-
-        // Debug: Print raw response to examine structure in debug mode
-        if !response_ok {
-            return Err(ZBError::ExplicitError(response_content));
+        let response_content = self.read_api_response(response)?;
+        let validation: ZBBatchValidation =
+            crate::utility::http_error::parse_json_body(&response_content)?;
+        for item in &validation.errors {
+            if item.email_address.eq_ignore_ascii_case("all") {
+                let message = crate::utility::http_error::strip_error_prefix(&item.error);
+                let message = if message.is_empty() {
+                    "Invalid API Key or your account ran out of credits".to_string()
+                } else {
+                    message
+                };
+                return Err(ZBError::ExplicitError(message));
+            }
         }
-
-        let validation = from_str::<ZBBatchValidation>(response_content.as_str())?;
         Ok(validation)
     }
-
 }
 
 #[cfg(test)]
@@ -178,14 +192,18 @@ mod test {
     #[test]
     fn test_serializing_example() {
         let emails_and_ip_addresses = vec![
-            ("valid@example.com".to_string(), "123.123.123.123".to_string()),
+            (
+                "valid@example.com".to_string(),
+                "123.123.123.123".to_string(),
+            ),
             ("invalid@example.com".to_string(), "".to_string()),
         ];
 
-        let body_result = ZeroBounce::new("some_api_key")
-            .batch_validate_prepare_body(emails_and_ip_addresses, &crate::utility::structures::validate_options::ZBValidateOptions::default());
+        let body_result = ZeroBounce::new("some_api_key").batch_validate_prepare_body(
+            emails_and_ip_addresses,
+            &crate::utility::structures::validate_options::ZBValidateOptions::default(),
+        );
 
         assert!(body_result.is_ok())
     }
-
 }

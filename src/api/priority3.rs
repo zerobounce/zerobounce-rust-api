@@ -5,9 +5,9 @@ use reqwest::blocking::multipart::{Form, Part};
 use serde::Deserialize;
 use serde_json::{from_str, Value};
 
-use crate::ZeroBounce;
 use crate::utility::structures::bulk::ZBFileFeedback;
 use crate::utility::{ZBError, ZBResult};
+use crate::ZeroBounce;
 
 fn bulk_api_root(bulk_url: &str) -> String {
     let trimmed = bulk_url.trim_end_matches('/');
@@ -21,6 +21,7 @@ fn post_bulk_root_multipart(
     file_bytes: Vec<u8>,
     fields: HashMap<String, String>,
 ) -> ZBResult<ZBFileFeedback> {
+    client.require_key()?;
     let mut form = Form::new()
         .part(
             "file",
@@ -33,12 +34,8 @@ fn post_bulk_root_multipart(
         form = form.text(key, value);
     }
     let response = client.client.post(url).multipart(form).send()?;
-    let ok = response.status().is_success();
-    let body = response.text()?;
-    if !ok {
-        return Err(ZBError::ExplicitError(body));
-    }
-    Ok(from_str(&body)?)
+    let body = client.read_api_response(response)?;
+    crate::utility::http_error::parse_json_body(&body)
 }
 
 fn post_bulk_root_form(
@@ -46,19 +43,20 @@ fn post_bulk_root_form(
     path: &str,
     fields: HashMap<String, String>,
 ) -> ZBResult<ZBFileFeedback> {
-    let url = format!("{}/{}", bulk_api_root(&client.url_provider.bulk_url), path.trim_start_matches('/'));
+    client.require_key()?;
+    let url = format!(
+        "{}/{}",
+        bulk_api_root(&client.url_provider.bulk_url),
+        path.trim_start_matches('/')
+    );
     let mut form: HashMap<&str, String> = fields
         .iter()
         .map(|(k, v)| (k.as_str(), v.clone()))
         .collect();
     form.insert("api_key", client.api_key.clone());
     let response = client.client.post(url).form(&form).send()?;
-    let ok = response.status().is_success();
-    let body = response.text()?;
-    if !ok {
-        return Err(ZBError::ExplicitError(body));
-    }
-    Ok(from_str(&body)?)
+    let body = client.read_api_response(response)?;
+    crate::utility::http_error::parse_json_body(&body)
 }
 
 #[derive(Deserialize, Debug)]
@@ -69,7 +67,11 @@ pub struct S3ListFileEntry {
 }
 
 fn bulk_root_file_status(client: &ZeroBounce, base: &str, file_id: &str) -> ZBResult<String> {
-    let url = format!("{}/{}/filestatus", bulk_api_root(&client.url_provider.bulk_url), base);
+    let url = format!(
+        "{}/{}/filestatus",
+        bulk_api_root(&client.url_provider.bulk_url),
+        base
+    );
     client.generic_get_request(url, HashMap::from([("file_id", file_id)]))
 }
 
@@ -181,17 +183,13 @@ impl ZeroBounce {
             file_id
         );
         let body = self.generic_get_request(url, HashMap::new())?;
-        Ok(from_str(&body)?)
+        crate::utility::http_error::parse_json_body(&body)
     }
 
     pub fn add_filter(&self, rule: &str, target: &str, value: &str) -> ZBResult<Value> {
         let body = self.generic_form_post_request(
             self.url_provider.url_of("/filters/add"),
-            HashMap::from([
-                ("rule", rule),
-                ("target", target),
-                ("value", value),
-            ]),
+            HashMap::from([("rule", rule), ("target", target), ("value", value)]),
         )?;
         Ok(from_str(&body)?)
     }
@@ -211,11 +209,7 @@ impl ZeroBounce {
     pub fn delete_filter(&self, rule: &str, target: &str, value: &str) -> ZBResult<Value> {
         let body = self.generic_form_post_request(
             self.url_provider.url_of("/filters/delete"),
-            HashMap::from([
-                ("rule", rule),
-                ("target", target),
-                ("value", value),
-            ]),
+            HashMap::from([("rule", rule), ("target", target), ("value", value)]),
         )?;
         Ok(from_str(&body)?)
     }
@@ -225,10 +219,7 @@ impl ZeroBounce {
         bucket: Option<&str>,
         search: Option<&str>,
     ) -> ZBResult<Vec<S3ListFileEntry>> {
-        let url = format!(
-            "{}/listS3files",
-            bulk_api_root(&self.url_provider.bulk_url)
-        );
+        let url = format!("{}/listS3files", bulk_api_root(&self.url_provider.bulk_url));
         let mut params: HashMap<&str, &str> = HashMap::new();
         if let Some(bucket) = bucket {
             if !bucket.trim().is_empty() {

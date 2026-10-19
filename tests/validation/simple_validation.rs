@@ -29,9 +29,9 @@ fn test_simple_validation_invalid_json() {
     mock.assert();
 
     let zb_error = validation.unwrap_err();
-    let ZBError::JsonError(_) = zb_error else {
-        panic!("unexpected error: {:#?}", zb_error);
-    };
+    let message = zb_error.to_string();
+    assert!(message.len() < 500, "{message}");
+    assert!(!message.contains("expected"), "{message}");
 }
 
 #[test]
