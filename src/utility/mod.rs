@@ -120,6 +120,7 @@ pub const SS_ROLE_BASED_CATCH_ALL: &str = "role_based_catch_all";
 pub const SS_DISPOSABLE: &str = "disposable";
 pub const SS_TOXIC: &str = "toxic";
 pub const SS_ACCEPT_ALL: &str = "accept_all";
+pub const SS_AI_AGENT_MAILBOX: &str = "ai_agent_mailbox";
 
 #[derive(Debug)]
 pub enum ZBError {

@@ -72,6 +72,7 @@ pub enum ZBValidateSubStatus {
     AcceptAll,
     RoleBasedAcceptAll,
     Gold,
+    AiAgentMailbox,
     /// Unknown or future API value (backward compatible)
     UnknownValue(String),
 }
@@ -112,6 +113,7 @@ impl FromStr for ZBValidateSubStatus {
             "accept_all" => ZBValidateSubStatus::AcceptAll,
             "role_based_accept_all" => ZBValidateSubStatus::RoleBasedAcceptAll,
             "gold" => ZBValidateSubStatus::Gold,
+            "ai_agent_mailbox" => ZBValidateSubStatus::AiAgentMailbox,
             other => ZBValidateSubStatus::UnknownValue(other.to_string()),
         })
     }
