@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `ZBValidateOptions` for single validation: `timeout`, `activity_data`, `verify_plus`, and `use_post` (form-encoded `POST /v2/validate`). The same options apply to `batch_validate_with_options`.
 - `score_email` (`GET /v2/scoring`) and `score_email_post` (form-encoded `POST /v2/scoring`).
-- Bulk email finder, bulk domain search, list evaluator, and filters.
+- Bulk email finder, bulk domain search, list evaluator, filters, and S3 bulk (`validate_s3_file`, `score_s3_file`, `export_s3_file`, `list_s3_files`).
 - `ZBValidateOptions` accepts `domain_info`, `greylist_processing`, and `callback_url`. `callback_url` needs `greylist_processing: Some(true)` and is rejected without it, and when blank, before a request is sent.
 - `ZBValidation` carries `domain_website_exists`, `domain_registrant_company_name`, and `message`. `message` is read from the API's `Message` key, returned while greylist processing is still running.
 - Inbox Placement Tester on `https://bulkapi.zerobounce.net/api/ipt`: `get_inbox_placement_providers`, `get_inbox_placement_test_types`, `create_inbox_placement_test`, `get_inbox_placement_test`, `list_inbox_placement_tests`, `delete_inbox_placement_test`, `get_inbox_placement_webhook`, `set_inbox_placement_webhook`.

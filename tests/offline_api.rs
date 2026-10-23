@@ -74,6 +74,13 @@ fn success_body(path: &str, key: &str) -> (u16, &'static str, String) {
             format!(r#"{{"ok":true,"echo_api_key":{quoted}}}"#),
         );
     }
+    if path.contains("listS3files") {
+        return (
+            200,
+            "application/json",
+            format!(r#"[{{"name":{quoted},"size":1,"last_modified":""}}]"#),
+        );
+    }
     if path.contains("validatebatch") {
         return (
             200,
@@ -751,6 +758,33 @@ fn files_scoring_and_priority3() {
     zb.delete_filter("exclude", "domain", "example.com")
         .unwrap();
     assert!(only(&fake).path.ends_with("/filters/delete"));
+    zb.validate_s3_file("inbox.csv").unwrap();
+    assert!(only(&fake).path.ends_with("/validateS3file"));
+    zb.score_s3_file("inbox.csv").unwrap();
+    let request = only(&fake);
+    assert!(request.path.ends_with("/scoreS3file"));
+    assert!(!request.fields.contains_key("email_address_column"));
+    zb.export_s3_file("fid", "bucket-out").unwrap();
+    let request = only(&fake);
+    assert_eq!(
+        request.fields.get("export_bucket").map(String::as_str),
+        Some("bucket-out")
+    );
+    let files = zb.list_s3_files(None, None).unwrap();
+    assert_eq!(files[0].name, "file-key");
+    let request = only(&fake);
+    assert!(request.path.ends_with("/listS3files"));
+    assert!(!request.fields.contains_key("bucket"));
+    zb.list_s3_files(Some("inbox"), Some("csv")).unwrap();
+    let request = only(&fake);
+    assert_eq!(
+        request.fields.get("bucket").map(String::as_str),
+        Some("inbox")
+    );
+    assert_eq!(
+        request.fields.get("search").map(String::as_str),
+        Some("csv")
+    );
 }
 
 #[test]
@@ -809,6 +843,11 @@ fn invalid_arguments_are_rejected_before_a_request() {
         .unwrap_err()
         .to_string()
         .contains("domain_column"));
+    assert!(zb
+        .validate_s3_file("  ")
+        .unwrap_err()
+        .to_string()
+        .contains("file_name"));
     assert_eq!(fake.len(), 0);
 }
 

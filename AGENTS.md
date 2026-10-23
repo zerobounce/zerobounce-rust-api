@@ -11,7 +11,7 @@ Guidance for AI coding agents working in this repository.
 - `src/lib.rs`: client, URL builder, and the shared GET and form POST helpers.
 - `src/api/validation.rs`: single validate and `batch_validate` on the main API host.
 - `src/api/bulk.rs`: bulk validation and AI scoring file methods on `bulkapi`.
-- `src/api/priority3.rs`: bulk email finder, domain search, list evaluator, filters. Finder and domain search paths are on the bulk host without `/v2`.
+- `src/api/priority3.rs`: bulk email finder, domain search, list evaluator, filters, and S3. Finder and domain search paths are on the bulk host without `/v2`.
 - `src/api/inbox_placement.rs`: Inbox Placement Tester.
 - `src/utility/http_error.rs`: turns HTTP failures, HTML pages, and empty or non-JSON bodies into a short `ZBError`.
 - `tests/offline_api.rs`: offline suite. A local HTTP server records every request. The client is pointed at `http://127.0.0.1`, which the URL check allows.
@@ -28,7 +28,7 @@ cargo clippy --all-targets
 
 ## Conventions
 
-- **Only endpoints documented at https://www.zerobounce.net/docs/.** Do not add a method for an endpoint that the public docs do not describe, even if it exists on the server.
+- **Only endpoints documented at https://www.zerobounce.net/docs/.** Do not add a method for an endpoint that the public docs do not describe, even if it exists on the server. Check before concluding something is undocumented: the S3 bulk endpoints live under https://www.zerobounce.net/docs/api-integrations/amazon-s3-bulk-api, not the main API reference.
 - **The list evaluator and the Inbox Placement Tester have their own base URLs** on `ZBUrlProvider` (`list_evaluator_url`, `inbox_placement_url`). They are not built from `bulk_url`, and `send_evaluated_file` stays on the bulk base. Offline tests must point both at the fake server or they reach the live API.
 - **The Inbox Placement Tester takes the API key as the `api_key` query parameter and JSON bodies with camelCase fields.** Only fields the caller set are sent. Its error bodies use `detail`.
 
