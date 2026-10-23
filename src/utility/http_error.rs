@@ -49,7 +49,8 @@ fn html_title(body: &str) -> String {
 }
 
 fn first_api_error_field(object: &serde_json::Map<String, serde_json::Value>) -> String {
-    for key in ["error", "message", "error_message", "Message"] {
+    // "detail" is how the Inbox Placement Tester (Django REST framework) reports errors.
+    for key in ["error", "message", "error_message", "Message", "detail"] {
         match object.get(key) {
             Some(serde_json::Value::String(text)) if !text.trim().is_empty() => {
                 return text.trim().to_string();

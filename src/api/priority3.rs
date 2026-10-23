@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::io::Read;
 
 use reqwest::blocking::multipart::{Form, Part};
-use serde::Deserialize;
 use serde_json::{from_str, Value};
 
 use crate::utility::structures::bulk::ZBFileFeedback;
@@ -36,34 +35,6 @@ fn post_bulk_root_multipart(
     let response = client.client.post(url).multipart(form).send()?;
     let body = client.read_api_response(response)?;
     crate::utility::http_error::parse_json_body(&body)
-}
-
-fn post_bulk_root_form(
-    client: &ZeroBounce,
-    path: &str,
-    fields: HashMap<String, String>,
-) -> ZBResult<ZBFileFeedback> {
-    client.require_key()?;
-    let url = format!(
-        "{}/{}",
-        bulk_api_root(&client.url_provider.bulk_url),
-        path.trim_start_matches('/')
-    );
-    let mut form: HashMap<&str, String> = fields
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.clone()))
-        .collect();
-    form.insert("api_key", client.api_key.clone());
-    let response = client.client.post(url).form(&form).send()?;
-    let body = client.read_api_response(response)?;
-    crate::utility::http_error::parse_json_body(&body)
-}
-
-#[derive(Deserialize, Debug)]
-pub struct S3ListFileEntry {
-    pub name: String,
-    pub size: i64,
-    pub last_modified: String,
 }
 
 fn bulk_root_file_status(client: &ZeroBounce, base: &str, file_id: &str) -> ZBResult<String> {
@@ -158,8 +129,8 @@ impl ZeroBounce {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
         let url = format!(
-            "{}/v2/listevaluator/",
-            bulk_api_root(&self.url_provider.bulk_url)
+            "{}/",
+            self.url_provider.list_evaluator_url
         );
         post_bulk_root_multipart(
             self,
@@ -178,9 +149,9 @@ impl ZeroBounce {
             return Err(ZBError::explicit("empty parameter: file_id"));
         }
         let url = format!(
-            "{}/v2/listevaluator/{}/",
-            bulk_api_root(&self.url_provider.bulk_url),
-            file_id
+            "{}/{}/",
+            self.url_provider.list_evaluator_url,
+            crate::utility::encode_path_segment(file_id)
         );
         let body = self.generic_get_request(url, HashMap::new())?;
         crate::utility::http_error::parse_json_body(&body)
@@ -214,63 +185,4 @@ impl ZeroBounce {
         Ok(from_str(&body)?)
     }
 
-    pub fn list_s3_files(
-        &self,
-        bucket: Option<&str>,
-        search: Option<&str>,
-    ) -> ZBResult<Vec<S3ListFileEntry>> {
-        let url = format!("{}/listS3files", bulk_api_root(&self.url_provider.bulk_url));
-        let mut params: HashMap<&str, &str> = HashMap::new();
-        if let Some(bucket) = bucket {
-            if !bucket.trim().is_empty() {
-                params.insert("bucket", bucket);
-            }
-        }
-        if let Some(search) = search {
-            if !search.trim().is_empty() {
-                params.insert("search", search);
-            }
-        }
-        let body = self.generic_get_request(url, params)?;
-        Ok(from_str(&body)?)
-    }
-
-    pub fn validate_s3_file(&self, file_name: &str) -> ZBResult<ZBFileFeedback> {
-        if file_name.trim().is_empty() {
-            return Err(ZBError::explicit("empty parameter: file_name"));
-        }
-        post_bulk_root_form(
-            self,
-            "validateS3file",
-            HashMap::from([("file_name".to_string(), file_name.to_string())]),
-        )
-    }
-
-    pub fn score_s3_file(&self, file_name: &str) -> ZBResult<ZBFileFeedback> {
-        if file_name.trim().is_empty() {
-            return Err(ZBError::explicit("empty parameter: file_name"));
-        }
-        post_bulk_root_form(
-            self,
-            "scoreS3file",
-            HashMap::from([("file_name".to_string(), file_name.to_string())]),
-        )
-    }
-
-    pub fn export_s3_file(&self, file_id: &str, export_bucket: &str) -> ZBResult<ZBFileFeedback> {
-        if file_id.trim().is_empty() {
-            return Err(ZBError::explicit("empty parameter: file_id"));
-        }
-        if export_bucket.trim().is_empty() {
-            return Err(ZBError::explicit("empty parameter: export_bucket"));
-        }
-        post_bulk_root_form(
-            self,
-            "exportS3file",
-            HashMap::from([
-                ("file_id".to_string(), file_id.to_string()),
-                ("export_bucket".to_string(), export_bucket.to_string()),
-            ]),
-        )
-    }
 }

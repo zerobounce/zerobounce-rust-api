@@ -26,10 +26,25 @@ impl ZeroBounce {
                 ));
             }
         }
+        // callback_url only means anything while greylist processing is on, so it is
+        // rejected here rather than letting the API take the request.
+        if let Some(callback_url) = options.callback_url.as_deref() {
+            if options.greylist_processing != Some(true) {
+                return Err(ZBError::explicit(
+                    "Invalid parameter: callback_url requires greylist_processing = true",
+                ));
+            }
+            if callback_url.trim().is_empty() {
+                return Err(ZBError::explicit("Empty parameter: callback_url"));
+            }
+        }
+
         let mut query_args = HashMap::from([("email", email)]);
         let timeout_param;
         let activity_param;
         let verify_param;
+        let domain_info_param;
+        let greylist_param;
 
         if !ip_address.is_empty() {
             query_args.insert("ip_address", ip_address);
@@ -46,12 +61,25 @@ impl ZeroBounce {
             verify_param = if verify_plus { "true" } else { "false" };
             query_args.insert("verify_plus", verify_param);
         }
+        if let Some(domain_info) = options.domain_info {
+            domain_info_param = if domain_info { "true" } else { "false" };
+            query_args.insert("domain_info", domain_info_param);
+        }
+        if let Some(greylist_processing) = options.greylist_processing {
+            greylist_param = if greylist_processing { "true" } else { "false" };
+            query_args.insert("greylist_processing", greylist_param);
+        }
+        if let Some(callback_url) = options.callback_url.as_deref() {
+            query_args.insert("callback_url", callback_url);
+        }
 
         let response_content = if options.use_post {
             let mut form_args = HashMap::from([("email", email)]);
             let timeout_param;
             let activity_param;
             let verify_param;
+            let domain_info_param;
+            let greylist_param;
             if !ip_address.is_empty() {
                 form_args.insert("ip_address", ip_address);
             }
@@ -66,6 +94,17 @@ impl ZeroBounce {
             if let Some(verify_plus) = options.verify_plus {
                 verify_param = if verify_plus { "true" } else { "false" };
                 form_args.insert("verify_plus", verify_param);
+            }
+            if let Some(domain_info) = options.domain_info {
+                domain_info_param = if domain_info { "true" } else { "false" };
+                form_args.insert("domain_info", domain_info_param);
+            }
+            if let Some(greylist_processing) = options.greylist_processing {
+                greylist_param = if greylist_processing { "true" } else { "false" };
+                form_args.insert("greylist_processing", greylist_param);
+            }
+            if let Some(callback_url) = options.callback_url.as_deref() {
+                form_args.insert("callback_url", callback_url);
             }
             self.generic_form_post_request(self.url_provider.url_of(ENDPOINT_VALIDATE), form_args)?
         } else {

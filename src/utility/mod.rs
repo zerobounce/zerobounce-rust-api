@@ -48,7 +48,28 @@ impl From<&ApiBaseUrl> for String {
     }
 }
 
+/// Percent-encodes a value so it is one path segment.
+///
+/// Only the unreserved set from RFC 3986 is left alone, so `/`, spaces and the
+/// rest are escaped and a file id cannot break out of its segment. Written here
+/// rather than pulling in a crate for four lines.
+pub fn encode_path_segment(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(*byte as char)
+            }
+            _ => encoded.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    encoded
+}
+
 pub const BULK_URI: &str = "https://bulkapi.zerobounce.net/v2";
+/// The list evaluator and the Inbox Placement Tester are not under the bulk /v2 path.
+pub const LIST_EVALUATOR_URI: &str = "https://bulkapi.zerobounce.net/v2/listevaluator";
+pub const INBOX_PLACEMENT_URI: &str = "https://bulkapi.zerobounce.net/api/ipt";
 pub const ENDPOINT_CREDITS: &str = "/getcredits";
 pub const ENDPOINT_ACTIVITY_DATA: &str = "/activity";
 pub const ENDPOINT_SCORING: &str = "/scoring";

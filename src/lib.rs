@@ -18,6 +18,10 @@ pub use crate::utility::{ApiBaseUrl, ZBError, ZBResult};
 pub struct ZBUrlProvider {
     pub url: String,
     pub bulk_url: String,
+    /// Overridable; the list evaluator path differs from the other bulk endpoints.
+    pub list_evaluator_url: String,
+    /// Overridable; the Inbox Placement Tester is not under the bulk /v2 path.
+    pub inbox_placement_url: String,
 }
 
 impl ZBUrlProvider {
@@ -27,6 +31,12 @@ impl ZBUrlProvider {
     pub fn bulk_url_of(&self, endpoint: &str) -> String {
         self.bulk_url.to_owned() + endpoint
     }
+    pub fn list_evaluator_url_of(&self, endpoint: &str) -> String {
+        self.list_evaluator_url.to_owned() + endpoint
+    }
+    pub fn inbox_placement_url_of(&self, endpoint: &str) -> String {
+        self.inbox_placement_url.to_owned() + endpoint
+    }
 }
 
 impl Default for ZBUrlProvider {
@@ -34,6 +44,8 @@ impl Default for ZBUrlProvider {
         ZBUrlProvider {
             url: ApiBaseUrl::Default.as_str().to_string(),
             bulk_url: crate::utility::BULK_URI.to_string(),
+            list_evaluator_url: crate::utility::LIST_EVALUATOR_URI.to_string(),
+            inbox_placement_url: crate::utility::INBOX_PLACEMENT_URI.to_string(),
         }
     }
 }

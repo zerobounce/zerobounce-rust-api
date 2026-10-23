@@ -1,4 +1,5 @@
 pub mod bulk;
+pub mod inbox_placement;
 pub mod priority3;
 pub mod validation;
 

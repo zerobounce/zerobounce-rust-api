@@ -10,6 +10,10 @@ use zero_bounce::utility::structures::bulk::{
     zb_download_type, ZBBulkResponse, ZBFile, ZBGetFileOptions,
 };
 use zero_bounce::utility::structures::validate_options::ZBValidateOptions;
+use zero_bounce::api::inbox_placement::{
+    CreateInboxPlacementTestOptions, InboxPlacementProviderSelection,
+    ListInboxPlacementTestsOptions,
+};
 use zero_bounce::utility::BULK_URI;
 use zero_bounce::{ApiBaseUrl, ZeroBounce};
 
@@ -55,11 +59,19 @@ fn success_body(path: &str, key: &str) -> (u16, &'static str, String) {
             format!("email\n{key}@example.com\n"),
         );
     }
-    if path.contains("listS3files") {
+    if path.contains("/api/ipt") {
+        if key.starts_with("ipt-detail") {
+            // The Inbox Placement Tester (Django REST framework) reports "detail".
+            return (
+                404,
+                "application/json",
+                r#"{"detail":"Inbox placement test not found."}"#.to_string(),
+            );
+        }
         return (
             200,
             "application/json",
-            format!(r#"[{{"name":{quoted},"size":1,"last_modified":""}}]"#),
+            format!(r#"{{"ok":true,"echo_api_key":{quoted}}}"#),
         );
     }
     if path.contains("validatebatch") {
@@ -372,6 +384,10 @@ fn client(port: u16, key: &str) -> ZeroBounce {
     zb.base_url = format!("http://127.0.0.1:{port}/api/v2");
     zb.url_provider.url = format!("http://127.0.0.1:{port}/api/v2");
     zb.url_provider.bulk_url = format!("http://127.0.0.1:{port}/bulk/v2");
+    // These default to the live hosts, so they must be pointed at the fake too or
+    // the suite would reach the real API.
+    zb.url_provider.list_evaluator_url = format!("http://127.0.0.1:{port}/bulk/v2/listevaluator");
+    zb.url_provider.inbox_placement_url = format!("http://127.0.0.1:{port}/api/ipt");
     zb.client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::none())
@@ -735,33 +751,6 @@ fn files_scoring_and_priority3() {
     zb.delete_filter("exclude", "domain", "example.com")
         .unwrap();
     assert!(only(&fake).path.ends_with("/filters/delete"));
-    zb.validate_s3_file("inbox.csv").unwrap();
-    assert!(only(&fake).path.ends_with("/validateS3file"));
-    zb.score_s3_file("inbox.csv").unwrap();
-    let request = only(&fake);
-    assert!(request.path.ends_with("/scoreS3file"));
-    assert!(!request.fields.contains_key("email_address_column"));
-    zb.export_s3_file("fid", "bucket-out").unwrap();
-    let request = only(&fake);
-    assert_eq!(
-        request.fields.get("export_bucket").map(String::as_str),
-        Some("bucket-out")
-    );
-    let files = zb.list_s3_files(None, None).unwrap();
-    assert_eq!(files[0].name, "file-key");
-    let request = only(&fake);
-    assert!(request.path.ends_with("/listS3files"));
-    assert!(!request.fields.contains_key("bucket"));
-    zb.list_s3_files(Some("inbox"), Some("csv")).unwrap();
-    let request = only(&fake);
-    assert_eq!(
-        request.fields.get("bucket").map(String::as_str),
-        Some("inbox")
-    );
-    assert_eq!(
-        request.fields.get("search").map(String::as_str),
-        Some("csv")
-    );
 }
 
 #[test]
@@ -820,11 +809,6 @@ fn invalid_arguments_are_rejected_before_a_request() {
         .unwrap_err()
         .to_string()
         .contains("domain_column"));
-    assert!(zb
-        .validate_s3_file("  ")
-        .unwrap_err()
-        .to_string()
-        .contains("file_name"));
     assert_eq!(fake.len(), 0);
 }
 
@@ -922,4 +906,247 @@ fn concurrent_clients_do_not_share_keys() {
             1
         );
     }
+}
+
+#[test]
+fn validate_sends_the_new_options_only_when_set() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "parity-key");
+
+    zb.validate_email("a@example.com").unwrap();
+    let request = only(&fake);
+    assert!(!request.fields.contains_key("domain_info"));
+    assert!(!request.fields.contains_key("greylist_processing"));
+    assert!(!request.fields.contains_key("callback_url"));
+
+    let options = ZBValidateOptions {
+        domain_info: Some(true),
+        greylist_processing: Some(false),
+        ..Default::default()
+    };
+    zb.validate_email_with_options("a@example.com", "", &options)
+        .unwrap();
+    let request = only(&fake);
+    assert_eq!(
+        request.fields.get("domain_info").map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        request.fields.get("greylist_processing").map(String::as_str),
+        Some("false")
+    );
+
+    let options = ZBValidateOptions {
+        greylist_processing: Some(true),
+        callback_url: Some("https://example.com/cb".to_string()),
+        use_post: true,
+        ..Default::default()
+    };
+    zb.validate_email_with_options("a@example.com", "", &options)
+        .unwrap();
+    let request = only(&fake);
+    assert_eq!(request.method, "POST");
+    assert_eq!(
+        request.fields.get("callback_url").map(String::as_str),
+        Some("https://example.com/cb")
+    );
+}
+
+#[test]
+fn callback_url_without_greylist_processing_sends_no_request() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "parity-key");
+
+    let options = ZBValidateOptions {
+        callback_url: Some("https://example.com/cb".to_string()),
+        ..Default::default()
+    };
+    let error = zb
+        .validate_email_with_options("a@example.com", "", &options)
+        .unwrap_err();
+    assert!(error.to_string().contains("greylist_processing"));
+
+    let blank = ZBValidateOptions {
+        greylist_processing: Some(true),
+        callback_url: Some("   ".to_string()),
+        ..Default::default()
+    };
+    let error = zb
+        .validate_email_with_options("a@example.com", "", &blank)
+        .unwrap_err();
+    assert!(error.to_string().contains("callback_url"));
+    assert_eq!(fake.len(), 0);
+}
+
+#[test]
+fn inbox_placement_uses_its_own_host_and_camel_case_json() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "ipt-key");
+
+    zb.get_inbox_placement_providers().unwrap();
+    let request = only(&fake);
+    assert_eq!(request.method, "GET");
+    assert!(request.path.ends_with("/api/ipt/providers"));
+    assert_eq!(request.api_key, "ipt-key");
+
+    zb.get_inbox_placement_test_types().unwrap();
+    assert!(only(&fake).path.ends_with("/api/ipt/test-types"));
+
+    zb.create_inbox_placement_test("basic", &Default::default())
+        .unwrap();
+    let request = only(&fake);
+    assert_eq!(request.method, "POST");
+    assert!(request.path.ends_with("/api/ipt/test"));
+    assert_eq!(request.fields.get("name").map(String::as_str), Some("basic"));
+    assert!(!request.fields.contains_key("testType"));
+    assert!(!request.fields.contains_key("senderEmail"));
+
+    let options = CreateInboxPlacementTestOptions {
+        test_type: Some(1),
+        sender_email: Some("from@example.com".to_string()),
+        webhook_url: Some("https://example.com/hook".to_string()),
+        ..Default::default()
+    };
+    zb.create_inbox_placement_test("full", &options).unwrap();
+    let request = only(&fake);
+    assert_eq!(request.fields.get("testType").map(String::as_str), Some("1"));
+    assert_eq!(
+        request.fields.get("senderEmail").map(String::as_str),
+        Some("from@example.com")
+    );
+    assert_eq!(
+        request.fields.get("webhookUrl").map(String::as_str),
+        Some("https://example.com/hook")
+    );
+
+    zb.get_inbox_placement_test("a b/c").unwrap();
+    assert!(only(&fake).path.ends_with("/api/ipt/test/a%20b%2Fc"));
+
+    zb.delete_inbox_placement_test("t1").unwrap();
+    assert_eq!(only(&fake).method, "DELETE");
+
+    zb.set_inbox_placement_webhook("https://example.com/hook")
+        .unwrap();
+    let request = only(&fake);
+    assert_eq!(request.method, "PUT");
+    assert_eq!(
+        request.fields.get("webhookUrl").map(String::as_str),
+        Some("https://example.com/hook")
+    );
+}
+
+#[test]
+fn inbox_placement_list_sends_only_the_filters_that_are_set() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "ipt-key");
+
+    zb.list_inbox_placement_tests(&Default::default()).unwrap();
+    let request = only(&fake);
+    assert!(!request.fields.contains_key("status"));
+    assert!(!request.fields.contains_key("page"));
+
+    let options = ListInboxPlacementTestsOptions {
+        status: Some("finished".to_string()),
+        created_after: Some("2026-01-01".to_string()),
+        page: Some(2),
+        page_size: Some(50),
+        ..Default::default()
+    };
+    zb.list_inbox_placement_tests(&options).unwrap();
+    let request = only(&fake);
+    assert_eq!(
+        request.fields.get("status").map(String::as_str),
+        Some("finished")
+    );
+    assert_eq!(
+        request.fields.get("createdAfter").map(String::as_str),
+        Some("2026-01-01")
+    );
+    assert_eq!(request.fields.get("page").map(String::as_str), Some("2"));
+    assert_eq!(
+        request.fields.get("page_size").map(String::as_str),
+        Some("50")
+    );
+}
+
+#[test]
+fn inbox_placement_rejects_invalid_arguments_before_a_request() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "ipt-key");
+
+    assert!(zb
+        .create_inbox_placement_test("", &Default::default())
+        .is_err());
+    assert!(zb
+        .create_inbox_placement_test(&"x".repeat(65), &Default::default())
+        .is_err());
+    assert!(zb
+        .create_inbox_placement_test(
+            "t",
+            &CreateInboxPlacementTestOptions {
+                test_type: Some(4),
+                ..Default::default()
+            }
+        )
+        .is_err());
+    assert!(zb
+        .create_inbox_placement_test(
+            "t",
+            &CreateInboxPlacementTestOptions {
+                test_type: Some(1),
+                ..Default::default()
+            }
+        )
+        .is_err());
+    assert!(zb
+        .create_inbox_placement_test(
+            "t",
+            &CreateInboxPlacementTestOptions {
+                providers: Some(vec![InboxPlacementProviderSelection {
+                    id: 1,
+                    max_seeds: Some(0),
+                }]),
+                ..Default::default()
+            }
+        )
+        .is_err());
+    assert!(zb
+        .list_inbox_placement_tests(&ListInboxPlacementTestsOptions {
+            status: Some("queued".to_string()),
+            ..Default::default()
+        })
+        .is_err());
+    assert!(zb
+        .list_inbox_placement_tests(&ListInboxPlacementTestsOptions {
+            page_size: Some(101),
+            ..Default::default()
+        })
+        .is_err());
+    assert!(zb.get_inbox_placement_test("  ").is_err());
+    assert!(zb.delete_inbox_placement_test("").is_err());
+    assert!(zb.set_inbox_placement_webhook("  ").is_err());
+    assert_eq!(fake.len(), 0);
+}
+
+#[test]
+fn inbox_placement_detail_error_becomes_the_message() {
+    let (port, _fake) = start_fake();
+    let zb = client(port, "ipt-detail-key");
+
+    let error = zb.get_inbox_placement_providers().unwrap_err();
+    assert!(error.to_string().contains("Inbox placement test not found"));
+    assert_short(&error);
+}
+
+#[test]
+fn list_evaluator_uses_its_own_base_url_and_encodes_file_id() {
+    let (port, fake) = start_fake();
+    let mut zb = client(port, "le-key");
+
+    zb.get_list_evaluator_result("a b/c").unwrap();
+    assert!(only(&fake).path.ends_with("/listevaluator/a%20b%2Fc/"));
+
+    zb.url_provider.list_evaluator_url = format!("http://127.0.0.1:{port}/custom/listevaluator");
+    zb.get_list_evaluator_result("fid").unwrap();
+    assert!(only(&fake).path.ends_with("/custom/listevaluator/fid/"));
 }
