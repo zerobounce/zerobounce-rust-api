@@ -36,6 +36,45 @@ fn post_bulk_root_form(
     crate::utility::http_error::parse_json_body(&body)
 }
 
+/// POST one of the documented S3 / SFTP file jobs on the bulkapi root.
+///
+/// `file_name` is optional only for `validateSFTPfile`; every other job requires it.
+fn bulk_root_file_job(
+    client: &ZeroBounce,
+    path: &str,
+    file_name: Option<&str>,
+    has_header_row: bool,
+    remove_duplicates: Option<bool>,
+    return_url: Option<&str>,
+    file_name_required: bool,
+) -> ZBResult<ZBFileFeedback> {
+    match file_name {
+        None if file_name_required => {
+            return Err(ZBError::explicit("empty parameter: file_name"));
+        }
+        Some(name) if name.trim().is_empty() => {
+            return Err(ZBError::explicit("empty parameter: file_name"));
+        }
+        _ => {}
+    }
+
+    let mut fields: HashMap<String, String> = HashMap::new();
+    fields.insert("has_header_row".to_string(), has_header_row.to_string());
+    if let Some(name) = file_name {
+        fields.insert("file_name".to_string(), name.to_string());
+    }
+    if let Some(remove_duplicates) = remove_duplicates {
+        fields.insert(
+            "remove_duplicates".to_string(),
+            remove_duplicates.to_string(),
+        );
+    }
+    if let Some(return_url) = return_url {
+        fields.insert("return_url".to_string(), return_url.to_string());
+    }
+    post_bulk_root_form(client, path, fields)
+}
+
 #[derive(Deserialize, Debug)]
 pub struct S3ListFileEntry {
     pub name: String,
@@ -273,5 +312,151 @@ impl ZeroBounce {
                 ("export_bucket".to_string(), export_bucket.to_string()),
             ]),
         )
+    }
+
+    /// Run the email finder on a file in your Amazon S3 bucket (POST /emailFinderS3file).
+    ///
+    /// `file_name` is the full path as returned by [`list_s3_files`](Self::list_s3_files).
+    pub fn email_finder_s3_file(
+        &self,
+        file_name: &str,
+        has_header_row: bool,
+        remove_duplicates: Option<bool>,
+        return_url: Option<&str>,
+    ) -> ZBResult<ZBFileFeedback> {
+        bulk_root_file_job(
+            self,
+            "emailFinderS3file",
+            Some(file_name),
+            has_header_row,
+            remove_duplicates,
+            return_url,
+            true,
+        )
+    }
+
+    /// Run domain search on a file in your Amazon S3 bucket (POST /domainSearchS3file).
+    pub fn domain_search_s3_file(
+        &self,
+        file_name: &str,
+        has_header_row: bool,
+        remove_duplicates: Option<bool>,
+        return_url: Option<&str>,
+    ) -> ZBResult<ZBFileFeedback> {
+        bulk_root_file_job(
+            self,
+            "domainSearchS3file",
+            Some(file_name),
+            has_header_row,
+            remove_duplicates,
+            return_url,
+            true,
+        )
+    }
+
+    // SFTP / FTP bulk. The server, path and protocol come from your ZeroBounce settings.
+
+    /// Validate a file from your SFTP/FTP server (POST /validateSFTPfile).
+    ///
+    /// The docs list `file_name` as optional here alone; pass `None` to use the input
+    /// bucket configured in your ZeroBounce settings.
+    pub fn validate_sftp_file(
+        &self,
+        file_name: Option<&str>,
+        has_header_row: bool,
+        remove_duplicates: Option<bool>,
+        return_url: Option<&str>,
+    ) -> ZBResult<ZBFileFeedback> {
+        bulk_root_file_job(
+            self,
+            "validateSFTPfile",
+            file_name,
+            has_header_row,
+            remove_duplicates,
+            return_url,
+            false,
+        )
+    }
+
+    /// Score a file from your SFTP/FTP server (POST /scoreSFTPfile).
+    ///
+    /// `file_name` is a plain name such as `my_file.txt`.
+    pub fn score_sftp_file(
+        &self,
+        file_name: &str,
+        has_header_row: bool,
+        remove_duplicates: Option<bool>,
+        return_url: Option<&str>,
+    ) -> ZBResult<ZBFileFeedback> {
+        bulk_root_file_job(
+            self,
+            "scoreSFTPfile",
+            Some(file_name),
+            has_header_row,
+            remove_duplicates,
+            return_url,
+            true,
+        )
+    }
+
+    /// Run the email finder on a file from your SFTP/FTP server (POST /emailFinderSFTPfile).
+    pub fn email_finder_sftp_file(
+        &self,
+        file_name: &str,
+        has_header_row: bool,
+        remove_duplicates: Option<bool>,
+        return_url: Option<&str>,
+    ) -> ZBResult<ZBFileFeedback> {
+        bulk_root_file_job(
+            self,
+            "emailFinderSFTPfile",
+            Some(file_name),
+            has_header_row,
+            remove_duplicates,
+            return_url,
+            true,
+        )
+    }
+
+    /// Run domain search on a file from your SFTP/FTP server (POST /domainSearchSFTPfile).
+    pub fn domain_search_sftp_file(
+        &self,
+        file_name: &str,
+        has_header_row: bool,
+        remove_duplicates: Option<bool>,
+        return_url: Option<&str>,
+    ) -> ZBResult<ZBFileFeedback> {
+        bulk_root_file_job(
+            self,
+            "domainSearchSFTPfile",
+            Some(file_name),
+            has_header_row,
+            remove_duplicates,
+            return_url,
+            true,
+        )
+    }
+
+    /// Export a validated or scored file back to your SFTP/FTP server (POST /exportSFTPfile).
+    ///
+    /// Note the field name: this endpoint takes `export_path`, not the `export_bucket`
+    /// that [`export_s3_file`](Self::export_s3_file) uses. Pass `None` to use the export
+    /// path from your ZeroBounce settings.
+    pub fn export_sftp_file(
+        &self,
+        file_id: &str,
+        export_path: Option<&str>,
+    ) -> ZBResult<ZBFileFeedback> {
+        if file_id.trim().is_empty() {
+            return Err(ZBError::explicit("empty parameter: file_id"));
+        }
+        let mut fields = HashMap::from([("file_id".to_string(), file_id.to_string())]);
+        if let Some(export_path) = export_path {
+            if export_path.trim().is_empty() {
+                return Err(ZBError::explicit("empty parameter: export_path"));
+            }
+            fields.insert("export_path".to_string(), export_path.to_string());
+        }
+        post_bulk_root_form(self, "exportSFTPfile", fields)
     }
 }

@@ -788,6 +788,137 @@ fn files_scoring_and_priority3() {
 }
 
 #[test]
+fn s3_and_sftp_file_jobs_send_the_documented_fields_only() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "user");
+
+    zb.email_finder_s3_file("lists/leads.csv", true, None, None)
+        .unwrap();
+    let request = only(&fake);
+    assert_eq!(request.method, "POST");
+    assert!(
+        request.path.ends_with("/emailFinderS3file"),
+        "{}",
+        request.path
+    );
+    assert_eq!(
+        request.fields.get("file_name").map(String::as_str),
+        Some("lists/leads.csv")
+    );
+    // Booleans go on the wire as the strings "true"/"false".
+    assert_eq!(
+        request.fields.get("has_header_row").map(String::as_str),
+        Some("true")
+    );
+    // Unset options stay off the request entirely.
+    assert!(!request.fields.contains_key("remove_duplicates"));
+    assert!(!request.fields.contains_key("return_url"));
+
+    zb.domain_search_s3_file(
+        "lists/leads.csv",
+        false,
+        Some(true),
+        Some("https://example.com/done"),
+    )
+    .unwrap();
+    let request = only(&fake);
+    assert!(request.path.ends_with("/domainSearchS3file"));
+    assert_eq!(
+        request.fields.get("has_header_row").map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        request.fields.get("remove_duplicates").map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        request.fields.get("return_url").map(String::as_str),
+        Some("https://example.com/done")
+    );
+
+    // file_name is optional for validateSFTPfile alone: without it the input bucket
+    // from the account's settings is used.
+    zb.validate_sftp_file(None, true, None, None).unwrap();
+    let request = only(&fake);
+    assert!(
+        request.path.ends_with("/validateSFTPfile"),
+        "{}",
+        request.path
+    );
+    assert!(!request.fields.contains_key("file_name"));
+    assert_eq!(
+        request.fields.get("has_header_row").map(String::as_str),
+        Some("true")
+    );
+
+    zb.validate_sftp_file(Some("my_file.txt"), true, None, None)
+        .unwrap();
+    assert_eq!(
+        only(&fake).fields.get("file_name").map(String::as_str),
+        Some("my_file.txt")
+    );
+
+    zb.score_sftp_file("my_file.txt", true, None, None).unwrap();
+    assert!(only(&fake).path.ends_with("/scoreSFTPfile"));
+    zb.email_finder_sftp_file("my_file.txt", true, None, None)
+        .unwrap();
+    assert!(only(&fake).path.ends_with("/emailFinderSFTPfile"));
+    zb.domain_search_sftp_file("my_file.txt", true, None, None)
+        .unwrap();
+    assert!(only(&fake).path.ends_with("/domainSearchSFTPfile"));
+
+    // exportSFTPfile takes export_path, not the export_bucket exportS3file uses.
+    zb.export_sftp_file("fid", Some("/exports")).unwrap();
+    let request = only(&fake);
+    assert!(
+        request.path.ends_with("/exportSFTPfile"),
+        "{}",
+        request.path
+    );
+    assert_eq!(
+        request.fields.get("export_path").map(String::as_str),
+        Some("/exports")
+    );
+    assert!(!request.fields.contains_key("export_bucket"));
+
+    zb.export_sftp_file("fid", None).unwrap();
+    assert!(!only(&fake).fields.contains_key("export_path"));
+}
+
+#[test]
+fn s3_and_sftp_file_jobs_reject_invalid_arguments_before_a_request() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "user");
+
+    for error in [
+        zb.email_finder_s3_file("  ", true, None, None).unwrap_err(),
+        zb.domain_search_s3_file("", true, None, None).unwrap_err(),
+        zb.score_sftp_file(" ", true, None, None).unwrap_err(),
+        zb.email_finder_sftp_file("", true, None, None).unwrap_err(),
+        zb.domain_search_sftp_file("", true, None, None)
+            .unwrap_err(),
+        // None is allowed here, but a blank name still is not.
+        zb.validate_sftp_file(Some(" "), true, None, None)
+            .unwrap_err(),
+    ] {
+        assert!(error.to_string().contains("file_name"), "{error}");
+    }
+
+    assert!(zb
+        .export_sftp_file("  ", None)
+        .unwrap_err()
+        .to_string()
+        .contains("file_id"));
+    assert!(zb
+        .export_sftp_file("fid", Some(" "))
+        .unwrap_err()
+        .to_string()
+        .contains("export_path"));
+
+    assert_eq!(fake.len(), 0);
+}
+
+#[test]
 fn invalid_arguments_are_rejected_before_a_request() {
     let (port, fake) = start_fake();
     let empty = client(port, "");

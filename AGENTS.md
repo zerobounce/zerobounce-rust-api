@@ -11,7 +11,7 @@ Guidance for AI coding agents working in this repository.
 - `src/lib.rs`: client, URL builder, and the shared GET and form POST helpers.
 - `src/api/validation.rs`: single validate and `batch_validate` on the main API host.
 - `src/api/bulk.rs`: bulk validation and AI scoring file methods on `bulkapi`.
-- `src/api/priority3.rs`: bulk email finder, domain search, list evaluator, filters, and S3. Finder and domain search paths are on the bulk host without `/v2`.
+- `src/api/priority3.rs`: bulk email finder, domain search, list evaluator, filters, and the S3 / SFTP bulk jobs. Finder and domain search paths are on the bulk host without `/v2`. The six file jobs go through `bulk_root_file_job`; two shapes differ from the rest and are easy to get wrong — `validate_sftp_file`'s `file_name` is optional (hence `Option`), and `export_sftp_file` takes `export_path`, not `export_bucket`.
 - `src/api/inbox_placement.rs`: Inbox Placement Tester.
 - `src/utility/http_error.rs`: turns HTTP failures, HTML pages, and empty or non-JSON bodies into a short `ZBError`.
 - `tests/offline_api.rs`: offline suite. A local HTTP server records every request. The client is pointed at `http://127.0.0.1`, which the URL check allows.

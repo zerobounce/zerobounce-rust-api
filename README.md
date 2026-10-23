@@ -130,6 +130,37 @@ let webhook = zb.get_inbox_placement_webhook()?;
 zb.delete_inbox_placement_test("123")?;
 ```
 
+## S3 and SFTP/FTP bulk
+
+Queue a job on a file that already sits in your Amazon S3 bucket, or on your
+SFTP/FTP server. See the [S3](https://www.zerobounce.net/docs/api-integrations/amazon-s3-bulk-api)
+and [SFTP](https://www.zerobounce.net/docs/api-integrations/sftp_bulk_api) docs.
+
+```rust
+let zb = ZeroBounce::new("<YOUR_API_KEY>");
+
+// Amazon S3. file_name is the full path, as returned by list_s3_files.
+zb.email_finder_s3_file("lists/leads.csv", true, None, None)?;
+zb.domain_search_s3_file(
+    "lists/leads.csv",
+    true,
+    Some(true),                                // remove_duplicates
+    Some("https://example.com/zerobounce-done"), // return_url
+)?;
+
+// SFTP/FTP. The server, path and protocol come from your ZeroBounce settings.
+// file_name is optional for validate_sftp_file alone — None uses the input
+// bucket from those settings.
+zb.validate_sftp_file(None, true, None, None)?;
+zb.score_sftp_file("my_file.txt", true, None, None)?;
+zb.email_finder_sftp_file("my_file.txt", true, None, None)?;
+zb.domain_search_sftp_file("my_file.txt", true, None, None)?;
+
+// Note the field: this one takes export_path, not export_bucket.
+// None uses the export path from your settings.
+zb.export_sftp_file("<FILE_ID>", Some("/exports"))?;
+```
+
 ## Per-API base URLs
 
 The list evaluator and the Inbox Placement Tester have their own base URLs,
