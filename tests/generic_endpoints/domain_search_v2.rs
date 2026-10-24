@@ -96,9 +96,9 @@ fn test_domain_search_v2_invalid_json() {
     mock.assert();
 
     let zb_error = result.unwrap_err();
-    let ZBError::JsonError(_) = zb_error else {
-        panic!("unexpected error: {:#?}", zb_error);
-    };
+    let message = zb_error.to_string();
+    assert!(message.len() < 500, "{message}");
+    assert!(!message.contains("expected"), "{message}");
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn test_domain_search_v2_bad_request() {
     mock.assert();
 
     let zb_error = result.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
 }

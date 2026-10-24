@@ -24,5 +24,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Clippy
+        run: cargo clippy --all-targets
+
       - name: Run tests
         run: cargo test --no-fail-fast

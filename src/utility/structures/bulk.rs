@@ -7,10 +7,9 @@ use reqwest::blocking::multipart::{Form, Part};
 
 use serde::Deserialize;
 
-use crate::utility::{ZBResult, ZBError};
 use crate::utility::structures::custom_deserialize::deserialize_date_rfc;
 use crate::utility::structures::custom_deserialize::deserialize_percentage_float;
-
+use crate::utility::{ZBError, ZBResult};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBFileFeedback {
@@ -19,7 +18,6 @@ pub struct ZBFileFeedback {
     pub file_name: Option<String>,
     pub file_id: Option<String>,
 }
-
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBFileStatus {
@@ -32,10 +30,10 @@ pub struct ZBFileStatus {
     pub file_phase_2_status: Option<String>,
     pub return_url: Option<String>,
 
-    #[serde(deserialize_with="deserialize_date_rfc")]
+    #[serde(deserialize_with = "deserialize_date_rfc")]
     pub upload_date: DateTime<FixedOffset>,
 
-    #[serde(deserialize_with="deserialize_percentage_float")]
+    #[serde(deserialize_with = "deserialize_percentage_float")]
     pub complete_percentage: f32,
 }
 
@@ -64,10 +62,10 @@ impl Debug for ZBBulkResponse {
         match &self {
             Self::Content(cnt) => {
                 write!(f, "<ZBBulkResponse::Content | size {}>", cnt.len())
-            },
+            }
             Self::Feedback(feedback) => {
                 write!(f, "<ZBBulkResponse::Feedback | {:#?}>", feedback)
-            },
+            }
         }
     }
 }
@@ -125,7 +123,6 @@ impl Default for ZBFile {
 }
 
 impl ZBFile {
-
     pub fn from_path(path_to_file: String) -> ZBFile {
         ZBFile {
             content_type: ZBFileContentType::FilePath(path_to_file),
@@ -159,39 +156,46 @@ impl ZBFile {
     fn file_content_multipart(&self) -> ZBResult<Part> {
         match self.content_type.clone() {
             ZBFileContentType::Empty => Err(ZBError::explicit("bulk content cannot be empty")),
-            ZBFileContentType::FilePath(file_path) => Ok(
-                Part::file(file_path.clone())?
-            ),
+            ZBFileContentType::FilePath(file_path) => Ok(Part::file(file_path.clone())?),
             ZBFileContentType::RawContent(value) => {
-                let name = self.file_name.clone().unwrap_or_else(|| "file.csv".to_string());
-                Ok(
-                    Part::bytes(value)
-                        .file_name(name)
-                        .mime_str("text/csv")?
-                )
+                let name = self
+                    .file_name
+                    .clone()
+                    .unwrap_or_else(|| "file.csv".to_string());
+                Ok(Part::bytes(value).file_name(name).mime_str("text/csv")?)
             }
         }
     }
 
     pub fn generate_multipart(&self) -> ZBResult<Form> {
+        self.generate_multipart_with(true)
+    }
+
+    /// `include_person_columns` is true for validation sendfile. Scoring sendfile omits them.
+    pub(crate) fn generate_multipart_with(&self, include_person_columns: bool) -> ZBResult<Form> {
         let content_part = self.file_content_multipart()?;
         let mut multipart_form = Form::new()
             .part("file", content_part)
             .text("has_header_row", self.has_header_row.to_string())
             .text("remove_duplicate", self.remove_duplicate.to_string())
-            .text("email_address_column", self.email_address_column.to_string());
+            .text(
+                "email_address_column",
+                self.email_address_column.to_string(),
+            );
 
-        if let Some(amount) = self.first_name_column {
-            multipart_form = multipart_form.text("first_name_column", amount.to_string());
-        }
-        if let Some(amount) = self.last_name_column {
-            multipart_form = multipart_form.text("last_name_column", amount.to_string());
-        }
-        if let Some(amount) = self.gender_column {
-            multipart_form = multipart_form.text("gender_column", amount.to_string());
-        }
-        if let Some(amount) = self.ip_address_column {
-            multipart_form = multipart_form.text("ip_address_column", amount.to_string());
+        if include_person_columns {
+            if let Some(amount) = self.first_name_column {
+                multipart_form = multipart_form.text("first_name_column", amount.to_string());
+            }
+            if let Some(amount) = self.last_name_column {
+                multipart_form = multipart_form.text("last_name_column", amount.to_string());
+            }
+            if let Some(amount) = self.gender_column {
+                multipart_form = multipart_form.text("gender_column", amount.to_string());
+            }
+            if let Some(amount) = self.ip_address_column {
+                multipart_form = multipart_form.text("ip_address_column", amount.to_string());
+            }
         }
         if let Some(url) = &self.return_url {
             multipart_form = multipart_form.text("return_url", url.clone());
@@ -254,20 +258,17 @@ impl ZBFile {
     }
 }
 
-
 #[cfg(test)]
-
 mod test {
-    use chrono::{NaiveDate, NaiveTime, NaiveDateTime};
-    use serde_json::{Result as SerdeResult, from_str};
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use serde_json::{from_str, Result as SerdeResult};
 
     use super::*;
-    use crate::utility::mock_constants::BULK_VALIDATION_SUBMIT_OK;
-    use crate::utility::mock_constants::BULK_VALIDATION_STATUS_OK;
-    use crate::utility::mock_constants::BULK_VALIDATION_STATUS_DELETED;
-    use crate::utility::mock_constants::BULK_VALIDATION_RESULT_DELETED;
     use crate::utility::mock_constants::BULK_VALIDATION_DELETE_OK;
-
+    use crate::utility::mock_constants::BULK_VALIDATION_RESULT_DELETED;
+    use crate::utility::mock_constants::BULK_VALIDATION_STATUS_DELETED;
+    use crate::utility::mock_constants::BULK_VALIDATION_STATUS_OK;
+    use crate::utility::mock_constants::BULK_VALIDATION_SUBMIT_OK;
 
     #[test]
     fn test_parsing_file_submit_response_ok() {
@@ -275,7 +276,7 @@ mod test {
         assert!(validation.is_ok());
 
         let validation_obj = validation.unwrap();
-        assert_eq!(validation_obj.success, true);
+        assert!(validation_obj.success);
         assert!(validation_obj.file_id.is_some());
         assert!(validation_obj.file_name.is_some());
         assert_eq!(validation_obj.message, "File Accepted");
@@ -292,7 +293,7 @@ mod test {
         );
 
         let file_status_obj = file_status.unwrap();
-        assert_eq!(file_status_obj.success, true);
+        assert!(file_status_obj.success);
         assert_eq!(file_status_obj.complete_percentage, 100.);
         assert_eq!(file_status_obj.upload_date.naive_utc(), expected_date_time);
         assert!(file_status_obj.return_url.is_some());
@@ -310,12 +311,11 @@ mod test {
         );
 
         let file_status_obj = file_status.unwrap();
-        assert_eq!(file_status_obj.success, true);
+        assert!(file_status_obj.success);
         assert_eq!(file_status_obj.complete_percentage, 0.);
         assert_eq!(file_status_obj.upload_date.naive_utc(), expected_date_time);
         assert!(file_status_obj.return_url.is_none());
         assert!(file_status_obj.error_reason.is_some());
-
     }
 
     #[test]
@@ -324,7 +324,7 @@ mod test {
         assert!(feedback.is_ok());
 
         let feedback_obj = feedback.unwrap();
-        assert_eq!(feedback_obj.success, false);
+        assert!(!(feedback_obj.success));
         assert!(feedback_obj.file_id.is_none());
         assert!(feedback_obj.file_name.is_none());
     }
@@ -335,10 +335,9 @@ mod test {
         assert!(feedback.is_ok());
 
         let feedback_obj = feedback.unwrap();
-        assert_eq!(feedback_obj.success, true);
+        assert!(feedback_obj.success);
         assert!(feedback_obj.file_id.is_some());
         assert!(feedback_obj.file_name.is_some());
         assert_eq!(feedback_obj.message, "File Deleted");
     }
-
 }

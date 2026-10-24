@@ -2,6 +2,7 @@ pub mod bulk;
 pub mod custom_deserialize;
 pub mod generic;
 pub mod validate_enums;
+pub mod validate_options;
 pub mod validation;
 
 pub use generic::{ActivityData, ApiUsage, FindEmailResponse, FindEmailResponseV2, DomainSearchResponseV2};
