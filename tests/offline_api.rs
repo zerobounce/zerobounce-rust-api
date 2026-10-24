@@ -21,6 +21,7 @@ struct Recorded {
     method: String,
     path: String,
     api_key: String,
+    #[allow(dead_code)]
     authorization: String,
     fields: HashMap<String, String>,
 }
