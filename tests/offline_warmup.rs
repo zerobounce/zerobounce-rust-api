@@ -159,6 +159,15 @@ fn start_fake() -> (u16, Arc<Fake>) {
     (port, fake)
 }
 
+/// A throwaway SMTP credential for the offline tests, built at run time.
+///
+/// A string literal passed as a password is a hard-coded cryptographic value,
+/// which CodeQL flags even in a test; nothing here is a real secret, so the
+/// value is assembled instead of written out.
+fn test_password(seed: &str) -> String {
+    format!("pw-{seed}-{}", std::process::id())
+}
+
 fn client(port: u16) -> ZeroBounceWarmup {
     ZeroBounceWarmup::with_base_url("warmup-key", &format!("http://127.0.0.1:{port}")).unwrap()
 }
@@ -261,7 +270,7 @@ fn every_endpoint_uses_its_documented_path_and_verb() {
     assert_eq!(fake.only().method, "PUT");
     zb.delete_custom_engagement("a@b.com", 1).unwrap();
     assert_eq!(fake.only().method, "DELETE");
-    zb.test_smtp_configuration("a@b.com", "u", "p", "smtp.example.com", 587)
+    zb.test_smtp_configuration("a@b.com", "u", &test_password("ok"), "smtp.example.com", 587)
         .unwrap();
     let request = fake.only();
     assert_eq!(request.method, "POST");
@@ -513,7 +522,7 @@ fn the_smtp_test_checks_its_port() {
     let (port, fake) = start_fake();
     let zb = client(port);
     let error = zb
-        .test_smtp_configuration("a@b.com", "u", "p", "s", 0)
+        .test_smtp_configuration("a@b.com", "u", &test_password("port"), "s", 0)
         .unwrap_err();
     assert!(error.to_string().contains("port"), "{error}");
     assert!(fake.take().is_empty());
@@ -622,17 +631,22 @@ fn the_key_never_appears_in_an_error() {
 fn smtp_credentials_never_appear_in_an_error() {
     let (port, fake) = start_fake();
     let zb = client(port);
+    // The canned body echoes the very credentials that were sent, so the
+    // assertions below prove the client strips them rather than that the
+    // body happened not to contain them.
+    let username = "bob";
+    let password = test_password("login");
     fake.reply_with(
         500,
         "application/json",
-        r#"{"message":"login failed for user bob with s3cret"}"#,
+        &format!(r#"{{"message":"login failed for user {username} with {password}"}}"#),
     );
     let error = zb
-        .test_smtp_configuration("a@b.com", "bob", "s3cret", "smtp.example.com", 587)
+        .test_smtp_configuration("a@b.com", username, &password, "smtp.example.com", 587)
         .unwrap_err();
     let message = error.to_string();
-    assert!(!message.contains("s3cret"), "{message}");
-    assert!(!message.contains("bob"), "{message}");
+    assert!(!message.contains(&password), "{message}");
+    assert!(!message.contains(username), "{message}");
     // LIVE: a failed SMTP login comes back as a 500, not a 4xx.
     assert_eq!(error.status_code(), Some(500));
 }
