@@ -22,7 +22,22 @@ Guidance for AI coding agents working in this repository.
 ```bash
 cargo test --no-fail-fast
 cargo clippy --all-targets
+cargo audit            # check dependencies against the advisory database
 ```
+
+The live API suite is behind the `live` feature, so `cargo test` and CI
+never compile or run it:
+
+```bash
+export ZEROBOUNCE_API_KEY=...          # validation API
+export ZEROBOUNCE_WARMUP_API_KEY=...   # Warmup API
+cargo test --features live --test live_api -- --nocapture          # free calls only
+ZEROBOUNCE_LIVE_SPEND=1 cargo test --features live --test live_api -- --nocapture
+ZEROBOUNCE_LIVE_CHANGES=1 cargo test --features live --test live_api -- --nocapture
+```
+
+Keys come from the environment only. Never write one into a file, a commit, a
+log, a fixture or a message.
 
 `cargo test` compiles the crate and the integration tests. That is the typecheck. CI (`.github/workflows/sdk_ci.yml`) runs `cargo clippy --all-targets` and `cargo test --no-fail-fast`. Clippy is not denied: existing tests use `assert_eq!` on booleans, and `cargo fmt --check` does not pass on the examples. Do not reformat files you did not change.
 
@@ -30,7 +45,10 @@ cargo clippy --all-targets
 
 - **Only endpoints documented at https://www.zerobounce.net/docs/.** Do not add a method for an endpoint that the public docs do not describe, even if it exists on the server. Check before concluding something is undocumented: the S3 bulk endpoints live under https://www.zerobounce.net/docs/api-integrations/amazon-s3-bulk-api, not the main API reference.
 - **The list evaluator and the Inbox Placement Tester have their own base URLs** on `ZBUrlProvider` (`list_evaluator_url`, `inbox_placement_url`). They are not built from `bulk_url`, and `send_evaluated_file` stays on the bulk base. Offline tests must point both at the fake server or they reach the live API.
-- **The Inbox Placement Tester takes the API key as the `api_key` query parameter and JSON bodies with camelCase fields.** Only fields the caller set are sent. Its error bodies use `detail`.
+- **Where the live API and the docs disagree, follow the API and say so in a comment at the call site.** The ones found so far: `validatebatch` takes `timeout` as a JSON *string*; the Inbox Placement Tester authenticates with `Authorization: Bearer`, not `api_key`; its listing is `GET /tests`, not `/test`; `send-evaluated-file` takes `file_id` as a form field, not a file upload; the S3 and SFTP jobs require `return_url` and `file_name`, `validateSFTPfile` included; the Warmup `check-domain-dmarc` takes an email address, not a domain; and a failed SMTP login in `test-smtp-configuration` comes back as an HTTP 500.
+- **The Inbox Placement Tester takes the API key as an `Authorization: Bearer` header and JSON bodies with camelCase fields.** Only fields the caller set are sent. Its error bodies use `detail`.
+- **`{"success": false}` on an HTTP 200 is a failure.** The API answers an unknown bulk file id that way. `ensure_json_api_body` turns it into a `ZBError::ApiError` carrying the status.
+- **`src/warmup.rs` is a separate client for the Warmup API**, a different product with its own host and its own team-scoped key. It is not part of `ZeroBounce`.
 
 - **One `ZeroBounce` per API key.** `api_key` is a field on the value. Do not share one value across users. The offline concurrency test builds a separate client per key.
 - **Column indexes.** `email_address_column` is a `u32` and is sent as given, including `0`. Name, gender, and IP columns are `Option<u32>`: `None` is omitted, and `Some(0)` is sent. Bulk finder `domain_column` of `0` is rejected.
@@ -38,7 +56,7 @@ cargo clippy --all-targets
 - **Booleans are the strings `true` and `false`.** `bool::to_string` does that. Do not send `1` or `0`. `allow_phase_2` is validation `sendfile` only. `activity_data` on getfile is validation only. AI scoring `sendfile` does not send name, gender, or IP columns.
 - **Empty `ip_address` is omitted** on single validate. Batch items always include `ip_address`, and an empty string is sent.
 - **`validate` timeout is 3–60 seconds. `batch_validate` timeout is 10–120 seconds.** Out-of-range values are rejected before a request.
-- **Failures are `ZBError`, which implements `std::error::Error`.** The message must be short: no raw HTML, no megabyte body, no serde dump, and no `Error: Error:` prefix. An account-level batch error (`email_address` `all`) is `Err`. A per-address error stays on the `Ok` result.
+- **Failures are `ZBError`, which implements `std::error::Error`.** The message must be short: no raw HTML, no megabyte body, no serde dump, and no `Error: Error:` prefix. An account-level batch error (`email_address` `all`) is `Err`. A per-address error stays on the `Ok` result. A failed API response is `ZBError::ApiError`, whose status is reachable through `ZBError::status_code()`; the key is never in the message.
 - **Tests must not call the live API.** Point `url_provider` at `http://127.0.0.1` or use `mockito`.
 - Match the surrounding style. Do not reformat unrelated code.
 
@@ -54,6 +72,8 @@ cargo clippy --all-targets
 ## Releasing
 
 Publishing and pushing tags need a maintainer's explicit approval. Do not bump the version, tag, or publish unless they asked.
+
+**Run the live suite by hand before every release.** The offline suite proves the SDK sends what we think it sends; only the live suite proves the API accepts it. Run it with real keys, including `ZEROBOUNCE_LIVE_SPEND=1` and `ZEROBOUNCE_LIVE_CHANGES=1`, and do not release on a failure.
 
 1. Move `[Unreleased]` entries under `## [x.y.z] - YYYY-MM-DD`, leave an empty `[Unreleased]` section, and update the compare links at the bottom of `CHANGELOG.md`.
 2. Set the same version in `Cargo.toml` `version` and in the `zero-bounce` package entry in `Cargo.lock`. The publish workflow fails if the tag and `Cargo.toml` disagree.

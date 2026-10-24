@@ -17,16 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ZBValidation` carries `domain_website_exists`, `domain_registrant_company_name`, and `message`. `message` is read from the API's `Message` key, returned while greylist processing is still running.
 - Inbox Placement Tester on `https://bulkapi.zerobounce.net/api/ipt`: `get_inbox_placement_providers`, `get_inbox_placement_test_types`, `create_inbox_placement_test`, `get_inbox_placement_test`, `list_inbox_placement_tests`, `delete_inbox_placement_test`, `get_inbox_placement_webhook`, `set_inbox_placement_webhook`.
 - `ZBUrlProvider` gains `list_evaluator_url` and `inbox_placement_url`, both overridable.
+- `ZeroBounceWarmup`, a client for the Warmup API. It is a separate product with its own host (`https://warmup-api.zerobounce.net`), its own team-scoped key sent in an `API-Key` header, and all 26 documented endpoints, including the seed-list and statistics CSV downloads.
+- `ZBError::ApiError { status, message }` and `ZBError::status_code()`, so callers can tell a Cloudflare 403 from an API 400/404 and a Warmup 429.
+- An opt-in live API suite behind the `live` cargo feature. `cargo test` and CI never compile it; running it takes `cargo test --features live --test live_api` with keys in the environment, and it only spends credits or changes the account behind `ZEROBOUNCE_LIVE_SPEND=1` and `ZEROBOUNCE_LIVE_CHANGES=1`.
 
 ### Changed
 
 - List evaluator requests use `ZBUrlProvider::list_evaluator_url` instead of building the path from the bulk base, and the file id is URL-encoded as one path segment. `send_evaluated_file` stays on the bulk base.
 
 - API requests time out after 120 seconds and do not follow redirects.
+- `batch_validate` sends `timeout` as a JSON string. Sent as a number, the live API rejects the whole batch with an account-level error.
+- The Inbox Placement Tester authenticates with an `Authorization: Bearer` header instead of an `api_key` parameter, so the key no longer reaches a query string that gets logged.
+- `send_evaluated_file(file_id)` posts the list evaluator's `file_id` as a form field. The endpoint rejects a file upload with "file_id: This field is required", so it no longer takes a file.
+- The S3 and SFTP/FTP jobs require `file_name` and `return_url`, `validate_sftp_file` included, so both are now `&str` rather than `Option`. The API answers "This field is required" otherwise.
 - A base URL must be `https://`, except `http://127.0.0.1`, `http://localhost`, and `http://[::1]` for tests.
 
 ### Fixed
 
+- `{"success": false}` on an HTTP 200 is an error instead of a result. The API answers an unknown bulk file id that way.
 - An error body whose JSON carries a `detail` string (the Inbox Placement Tester, Django REST framework) returns that text.
 
 - An HTML "Access denied" page is returned as a short `ZBError`. An HTML page with status 200 is an error as well, including bulk `getfile`, instead of file bytes or a JSON parse.
@@ -40,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Redirects are disabled, so a 3xx response cannot send the API key to another host.
 - Error values no longer include the raw HTML access-denied page.
+- A Warmup API key with surrounding whitespace or control characters is rejected, because the transport would otherwise quote it unredacted in its own error.
+- The Warmup SMTP test masks the username and password out of every error it raises.
 
 ## [2.1.2] - 2026-06-10
 

@@ -745,6 +745,68 @@ cargo run --example # list of available examples
 cargo run --example domain_search_v2
 ```
 
+## Warmup API
+
+The Warmup API is a separate product. It has its own host, its own team-scoped key, and its own client; your validation key will not work with it.
+
+```rust
+use zero_bounce::{OnboardingModel, ZeroBounceWarmup};
+
+let warmup = ZeroBounceWarmup::new("<YOUR_WARMUP_API_KEY>")?;
+
+let accounts = warmup.list_sending_accounts()?;
+let progress = warmup.get_progress_today()?;
+let csv = warmup.download_seeds()?;            // CSV text, columns seed,provider
+```
+
+Add a from-address you run yourself, with one of the five standard engagement rules (0 Default, 1 Slow Pace, 2 Repair, 3 Boost, 4 Protect):
+
+```rust
+warmup.add_sending_account(
+    "sender@example.com",
+    OnboardingModel::SelfManaged,
+    Some(0),
+    None,
+    None,
+    None,
+)?;
+```
+
+A custom engagement rule can be changed only once every seven days; inside that window the API answers 429.
+
+```rust
+warmup.create_custom_engagement("sender@example.com", 20, 20, 35)?;  // reply, important, click %
+```
+
+`check_domain_dmarc` takes an **email address**, not a domain — the live API rejects a bare domain even though the docs describe one:
+
+```rust
+let dmarc = warmup.check_domain_dmarc("sender@example.com", None)?;
+```
+
+Every documented empty success (204, or an empty 200) comes back as `Ok(None)`. Failures are `ZBError::ApiError`, whose status is reachable through `ZBError::status_code()`. Nothing is stored by `test_smtp_configuration`, and the credentials you pass it are masked out of any error it raises.
+
+## Live API suite
+
+`cargo test` never touches the network: the live suite is behind the `live` cargo feature, so CI does not even compile it. It needs real keys, which come from the environment and are never written anywhere:
+
+```bash
+export ZEROBOUNCE_API_KEY=...          # validation API
+export ZEROBOUNCE_WARMUP_API_KEY=...   # Warmup API
+cargo test --features live --test live_api -- --nocapture
+```
+
+By default it only makes free calls: sandbox addresses, reads, and requests that are expected to fail but still prove the API accepts the payload. It checks that the credit balance did not move. Two flags opt in to more:
+
+| Flag | What it adds |
+| --- | --- |
+| `ZEROBOUNCE_LIVE_SPEND=1` | billable calls (scoring, activity, email finder) and a bulk round trip that deletes its own job |
+| `ZEROBOUNCE_LIVE_CHANGES=1` | reversible account changes — a test filter and a self-managed Warmup sending account — each undone in cleanup even when a test fails |
+
+It never creates an Inbox Placement test, sets the Inbox Placement webhook, or starts ZB-managed Warmup onboarding, because the API cannot undo any of those.
+
+Run it by hand before every release: the offline suite proves the SDK sends what we think it sends, and only the live suite proves the API accepts it.
+
 ## Publish
 
 1. Bump `version` in `Cargo.toml`, commit, tag (`vX.Y.Z`), push tag.
