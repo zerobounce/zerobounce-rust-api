@@ -5,42 +5,87 @@ use crate::utility::structures::custom_deserialize::deserialize_only_date;
 use crate::utility::structures::custom_deserialize::deserialize_stringified_uint;
 
 #[derive(Clone, Debug, Deserialize)]
+/// LIVE: the API returns only the counters that apply to the account and the
+/// date range asked for — `sub_status_gold` and
+/// `sub_status_role_based_accept_all` are absent from an ordinary response.
+/// Deserializing them as required fields failed the whole call, so every
+/// counter defaults to 0 and a counter added later is ignored rather than
+/// fatal.
 pub struct ApiUsage {
+    #[serde(default)]
     pub total: u64,
+    #[serde(default)]
     pub status_valid: u64,
+    #[serde(default)]
     pub status_invalid: u64,
+    #[serde(default)]
     pub status_catch_all: u64,
+    #[serde(default)]
     pub status_do_not_mail: u64,
+    #[serde(default)]
     pub status_spamtrap: u64,
+    #[serde(default)]
     pub status_unknown: u64,
+    #[serde(default)]
     pub sub_status_toxic: u64,
+    #[serde(default)]
     pub sub_status_disposable: u64,
+    #[serde(default)]
     pub sub_status_role_based: u64,
+    #[serde(default)]
     pub sub_status_possible_trap: u64,
+    #[serde(default)]
     pub sub_status_global_suppression: u64,
+    #[serde(default)]
     pub sub_status_timeout_exceeded: u64,
+    #[serde(default)]
     pub sub_status_mail_server_temporary_error: u64,
+    #[serde(default)]
     pub sub_status_mail_server_did_not_respond: u64,
+    #[serde(default)]
     pub sub_status_greylisted: u64,
+    #[serde(default)]
     pub sub_status_antispam_system: u64,
+    #[serde(default)]
     pub sub_status_does_not_accept_mail: u64,
+    #[serde(default)]
     pub sub_status_exception_occurred: u64,
+    #[serde(default)]
     pub sub_status_failed_syntax_check: u64,
+    #[serde(default)]
     pub sub_status_mailbox_not_found: u64,
+    #[serde(default)]
     pub sub_status_unroutable_ip_address: u64,
+    #[serde(default)]
     pub sub_status_possible_typo: u64,
+    #[serde(default)]
     pub sub_status_no_dns_entries: u64,
+    #[serde(default)]
     pub sub_status_role_based_catch_all: u64,
+    #[serde(default)]
     pub sub_status_accept_all: u64,
+    #[serde(default)]
     pub sub_status_mailbox_quota_exceeded: u64,
+    #[serde(default)]
     pub sub_status_forcible_disconnect: u64,
+    #[serde(default)]
     pub sub_status_failed_smtp_connection: u64,
+    #[serde(default)]
     pub sub_status_mx_forward: u64,
+    #[serde(default)]
     pub sub_status_alternate: u64,
+    #[serde(default)]
     pub sub_status_allowed: u64,
+    #[serde(default)]
     pub sub_status_blocked: u64,
+    #[serde(default)]
     pub sub_status_gold: u64,
+    #[serde(default)]
     pub sub_status_role_based_accept_all: u64,
+    #[serde(default)]
+    pub sub_status_leading_period_removed: u64,
+    #[serde(default)]
+    pub sub_status_alias_address: u64,
 
     #[serde(deserialize_with="deserialize_only_date")]
     pub start_date: NaiveDate,

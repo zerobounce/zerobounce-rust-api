@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `get_api_usage` no longer fails outright. The API returns only the counters that apply to the account and the date range asked for, and an ordinary response carries neither `sub_status_gold` nor `sub_status_role_based_accept_all`; deserializing them as required fields failed the whole call, reported as "ZeroBounce returned a response that is not valid JSON". Every counter on `ApiUsage` now defaults to 0 when absent, so a counter the API adds or drops later is no longer fatal. `sub_status_leading_period_removed` and `sub_status_alias_address`, which the API does return, are now read.
+
 - `{"success": false}` on an HTTP 200 is an error instead of a result. The API answers an unknown bulk file id that way.
 - An error body whose JSON carries a `detail` string (the Inbox Placement Tester, Django REST framework) returns that text.
 
