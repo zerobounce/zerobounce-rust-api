@@ -177,7 +177,7 @@ impl ZeroBounce {
     }
 }
 
-fn parse_request_url(url: &str) -> ZBResult<reqwest::Url> {
+pub(crate) fn parse_request_url(url: &str) -> ZBResult<reqwest::Url> {
     let parsed = reqwest::Url::parse(url).map_err(|e| ZBError::ExplicitError(e.to_string()))?;
     if parsed.scheme() == "https" {
         return Ok(parsed);

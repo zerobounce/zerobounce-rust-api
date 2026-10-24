@@ -125,6 +125,10 @@ pub const SS_AI_AGENT_MAILBOX: &str = "ai_agent_mailbox";
 #[derive(Debug)]
 pub enum ZBError {
     ExplicitError(String),
+    /// A failed API response. The status lets callers tell a 403 from
+    /// Cloudflare apart from a 400/404 from the API and a 429 from the Warmup
+    /// rate limit. Both the validation client and the Warmup client return it.
+    ApiError { status: u16, message: String },
     JsonError(serde_json::Error),
     IntParseError(std::num::ParseIntError),
     RequestError(reqwest::Error),
@@ -137,12 +141,28 @@ impl ZBError {
     pub fn explicit(string: &str) -> ZBError {
         ZBError::ExplicitError(string.to_string())
     }
+
+    pub fn api(status: u16, message: impl Into<String>) -> ZBError {
+        ZBError::ApiError {
+            status,
+            message: message.into(),
+        }
+    }
+
+    /// The HTTP status of a failed API response, when there was one.
+    pub fn status_code(&self) -> Option<u16> {
+        match self {
+            ZBError::ApiError { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for ZBError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ZBError::ExplicitError(message) => write!(formatter, "{message}"),
+            ZBError::ApiError { message, .. } => write!(formatter, "{message}"),
             ZBError::JsonError(_) => {
                 write!(
                     formatter,

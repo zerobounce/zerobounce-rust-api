@@ -49,7 +49,7 @@ fn test_credits_bad_request() {
     mock.assert();
 
     let credits_error = credits.unwrap_err();
-    let ZBError::ExplicitError(_) = credits_error else {
+    let ZBError::ApiError { .. } = credits_error else {
         panic!("unexpected error: {:#?}", credits_error);
     };
 }

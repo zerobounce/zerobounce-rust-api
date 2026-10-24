@@ -121,6 +121,16 @@ pub fn message_from_body(status: u16, content_type: &str, body: &str) -> String 
     message
 }
 
+/// Whether a "success" field means failure. The API sends it as a JSON false,
+/// "false" or "False" depending on the endpoint.
+fn is_falsy_api_success(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Bool(flag) => !flag,
+        serde_json::Value::String(text) => text.eq_ignore_ascii_case("false"),
+        _ => false,
+    }
+}
+
 /// Accept a 2xx JSON document. Anything else is a short error.
 pub fn ensure_json_api_body(status: u16, content_type: &str, body: &str) -> ZBResult<()> {
     let success = (200..300).contains(&status);
@@ -131,11 +141,24 @@ pub fn ensure_json_api_body(status: u16, content_type: &str, body: &str) -> ZBRe
         || content_type_is_html(content_type)
         || (!trimmed.starts_with('{') && !trimmed.starts_with('['))
     {
-        return Err(ZBError::ExplicitError(message_from_body(
+        return Err(ZBError::api(
             status,
-            content_type,
-            body,
-        )));
+            message_from_body(status, content_type, body),
+        ));
+    }
+    // LIVE: {"success": false} on an HTTP 200 is a failure, not a result. The
+    // API answers an unknown bulk file id that way, with a 200.
+    if trimmed.starts_with('{') {
+        if let Ok(serde_json::Value::Object(object)) =
+            serde_json::from_str::<serde_json::Value>(trimmed)
+        {
+            if object.get("success").is_some_and(is_falsy_api_success) {
+                return Err(ZBError::api(
+                    status,
+                    message_from_body(status, content_type, body),
+                ));
+            }
+        }
     }
     Ok(())
 }

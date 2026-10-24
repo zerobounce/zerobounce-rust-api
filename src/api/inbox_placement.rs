@@ -235,11 +235,10 @@ impl ZeroBounce {
         &'a self,
         method: &str,
         path: &str,
-        mut query: HashMap<&'a str, &'a str>,
+        query: HashMap<&'a str, &'a str>,
         body: Option<Value>,
     ) -> ZBResult<Value> {
         self.require_key()?;
-        query.insert("api_key", self.api_key.as_str());
 
         let url = self.url_provider.inbox_placement_url_of(path);
         let parsed = reqwest::Url::parse(&url)
@@ -251,7 +250,10 @@ impl ZeroBounce {
             "DELETE" => self.client.delete(parsed),
             _ => self.client.get(parsed),
         }
-        .query(&query);
+        .query(&query)
+        // LIVE: the Inbox Placement Tester authenticates with a Bearer header.
+        // Sent as an api_key parameter the request is rejected as unauthorized.
+        .bearer_auth(self.api_key.as_str());
 
         if let Some(body) = body {
             // reqwest's json() helper needs its "json" feature, which this crate

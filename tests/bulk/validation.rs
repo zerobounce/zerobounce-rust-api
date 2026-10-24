@@ -44,7 +44,7 @@ fn test_bulk_validate_submit_bad_request() {
     assert!(response.is_err());
 
     let zb_error = response.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
 }
@@ -99,7 +99,7 @@ fn test_bulk_validate_status_bad_request() {
     assert!(response.is_err());
 
     let zb_error = response.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
 }
@@ -267,7 +267,7 @@ fn test_bulk_validate_delete_bad_request() {
     assert!(response.is_err());
 
     let zb_error = response.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
 }
@@ -282,12 +282,15 @@ fn test_bulk_validate_delete_not_ok() {
         .with_body(mock_constants::BULK_VALIDATION_DELETE_NOT_FOUND)
         .create();
 
+    // LIVE: {"success": false} on an HTTP 200 is a failure, not a result. The
+    // API answers an unknown file id that way, with a 200.
     let response = zb_instance.bulk_validation_result_delete("mock_file_id");
     mock.assert();
-    assert!(response.is_ok());
 
-    let response_obj = response.unwrap();
-    assert_eq!(response_obj.success, false, "{:#?}", response_obj);
+    let zb_error = response.unwrap_err();
+    assert_eq!(zb_error.status_code(), Some(200));
+    let message = zb_error.to_string();
+    assert!(message.len() < 500, "{message}");
 }
 
 #[test]

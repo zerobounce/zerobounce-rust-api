@@ -56,7 +56,7 @@ fn test_find_bad_request() {
     mock.assert();
 
     let zb_error = find_mail_res.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
 }
@@ -158,7 +158,7 @@ fn test_domain_search_bad_request() {
     mock.assert();
 
     let zb_error = domain_search_res.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
 }

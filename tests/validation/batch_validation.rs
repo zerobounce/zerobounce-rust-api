@@ -58,7 +58,7 @@ fn test_batch_validation_bad_request() {
     mock.assert();
 
     let zb_error = validation.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
 }

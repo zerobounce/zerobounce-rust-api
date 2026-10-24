@@ -21,6 +21,7 @@ struct Recorded {
     method: String,
     path: String,
     api_key: String,
+    authorization: String,
     fields: HashMap<String, String>,
 }
 
@@ -245,10 +246,14 @@ fn record_request(head: &str, body: &[u8]) -> Recorded {
     let mut fields = HashMap::new();
     parse_query(query, &mut fields);
     let mut content_type = String::new();
+    let mut authorization = String::new();
     for line in lines {
         let lower = line.to_ascii_lowercase();
         if let Some(value) = lower.strip_prefix("content-type:") {
             content_type = value.trim().to_string();
+        }
+        if lower.starts_with("authorization:") {
+            authorization = line["authorization:".len()..].trim().to_string();
         }
     }
     let body_text = String::from_utf8_lossy(body);
@@ -311,11 +316,22 @@ fn record_request(head: &str, body: &[u8]) -> Recorded {
             }
         }
     }
-    let api_key = fields.get("api_key").cloned().unwrap_or_default();
+    // The Inbox Placement Tester authenticates with a Bearer header rather than
+    // an api_key parameter, so the key can arrive either way.
+    let api_key = fields
+        .get("api_key")
+        .cloned()
+        .or_else(|| {
+            authorization
+                .strip_prefix("Bearer ")
+                .map(|key| key.trim().to_string())
+        })
+        .unwrap_or_default();
     Recorded {
         method,
         path: path.to_string(),
         api_key,
+        authorization,
         fields,
     }
 }
@@ -735,9 +751,16 @@ fn files_scoring_and_priority3() {
     assert!(only(&fake).path.contains("/listevaluator/"));
     zb.get_list_evaluator_result("fid").unwrap();
     assert!(only(&fake).path.contains("/listevaluator/fid/"));
-    zb.send_evaluated_file("evaluated.csv", &b"a@example.com\n"[..])
-        .unwrap();
-    assert!(only(&fake).path.contains("/send-evaluated-file/"));
+    // LIVE: send-evaluated-file takes the evaluator's file_id as a form field,
+    // not a file upload.
+    zb.send_evaluated_file("eval-file-1").unwrap();
+    let request = only(&fake);
+    assert!(request.path.contains("/send-evaluated-file/"));
+    assert_eq!(request.method, "POST");
+    assert_eq!(
+        request.fields.get("file_id").map(String::as_str),
+        Some("eval-file-1")
+    );
 
     zb.add_filter("exclude", "domain", "example.com").unwrap();
     let request = only(&fake);
@@ -792,7 +815,7 @@ fn s3_and_sftp_file_jobs_send_the_documented_fields_only() {
     let (port, fake) = start_fake();
     let zb = client(port, "user");
 
-    zb.email_finder_s3_file("lists/leads.csv", true, None, None)
+    zb.email_finder_s3_file("lists/leads.csv", true, None, "https://example.com/done")
         .unwrap();
     let request = only(&fake);
     assert_eq!(request.method, "POST");
@@ -812,13 +835,12 @@ fn s3_and_sftp_file_jobs_send_the_documented_fields_only() {
     );
     // Unset options stay off the request entirely.
     assert!(!request.fields.contains_key("remove_duplicates"));
-    assert!(!request.fields.contains_key("return_url"));
 
     zb.domain_search_s3_file(
         "lists/leads.csv",
         false,
         Some(true),
-        Some("https://example.com/done"),
+        "https://example.com/done",
     )
     .unwrap();
     let request = only(&fake);
@@ -836,34 +858,32 @@ fn s3_and_sftp_file_jobs_send_the_documented_fields_only() {
         Some("https://example.com/done")
     );
 
-    // file_name is optional for validateSFTPfile alone: without it the input bucket
-    // from the account's settings is used.
-    zb.validate_sftp_file(None, true, None, None).unwrap();
+    // LIVE: file_name is required here too, although the docs list it as
+    // optional for this one endpoint.
+    zb.validate_sftp_file("my_file.txt", true, None, "https://example.com/done")
+        .unwrap();
     let request = only(&fake);
     assert!(
         request.path.ends_with("/validateSFTPfile"),
         "{}",
         request.path
     );
-    assert!(!request.fields.contains_key("file_name"));
+    assert_eq!(
+        request.fields.get("file_name").map(String::as_str),
+        Some("my_file.txt")
+    );
     assert_eq!(
         request.fields.get("has_header_row").map(String::as_str),
         Some("true")
     );
 
-    zb.validate_sftp_file(Some("my_file.txt"), true, None, None)
+    zb.score_sftp_file("my_file.txt", true, None, "https://example.com/done")
         .unwrap();
-    assert_eq!(
-        only(&fake).fields.get("file_name").map(String::as_str),
-        Some("my_file.txt")
-    );
-
-    zb.score_sftp_file("my_file.txt", true, None, None).unwrap();
     assert!(only(&fake).path.ends_with("/scoreSFTPfile"));
-    zb.email_finder_sftp_file("my_file.txt", true, None, None)
+    zb.email_finder_sftp_file("my_file.txt", true, None, "https://example.com/done")
         .unwrap();
     assert!(only(&fake).path.ends_with("/emailFinderSFTPfile"));
-    zb.domain_search_sftp_file("my_file.txt", true, None, None)
+    zb.domain_search_sftp_file("my_file.txt", true, None, "https://example.com/done")
         .unwrap();
     assert!(only(&fake).path.ends_with("/domainSearchSFTPfile"));
 
@@ -890,18 +910,28 @@ fn s3_and_sftp_file_jobs_reject_invalid_arguments_before_a_request() {
     let (port, fake) = start_fake();
     let zb = client(port, "user");
 
+    let done = "https://example.com/done";
     for error in [
-        zb.email_finder_s3_file("  ", true, None, None).unwrap_err(),
-        zb.domain_search_s3_file("", true, None, None).unwrap_err(),
-        zb.score_sftp_file(" ", true, None, None).unwrap_err(),
-        zb.email_finder_sftp_file("", true, None, None).unwrap_err(),
-        zb.domain_search_sftp_file("", true, None, None)
-            .unwrap_err(),
-        // None is allowed here, but a blank name still is not.
-        zb.validate_sftp_file(Some(" "), true, None, None)
-            .unwrap_err(),
+        zb.email_finder_s3_file("  ", true, None, done).unwrap_err(),
+        zb.domain_search_s3_file("", true, None, done).unwrap_err(),
+        zb.score_sftp_file(" ", true, None, done).unwrap_err(),
+        zb.email_finder_sftp_file("", true, None, done).unwrap_err(),
+        zb.domain_search_sftp_file("", true, None, done).unwrap_err(),
+        zb.validate_sftp_file(" ", true, None, done).unwrap_err(),
     ] {
         assert!(error.to_string().contains("file_name"), "{error}");
+    }
+
+    // LIVE: return_url is required on every one of these jobs.
+    for error in [
+        zb.email_finder_s3_file("f.csv", true, None, "").unwrap_err(),
+        zb.domain_search_s3_file("f.csv", true, None, " ").unwrap_err(),
+        zb.validate_sftp_file("f.csv", true, None, "").unwrap_err(),
+        zb.score_sftp_file("f.csv", true, None, "").unwrap_err(),
+        zb.email_finder_sftp_file("f.csv", true, None, "").unwrap_err(),
+        zb.domain_search_sftp_file("f.csv", true, None, "").unwrap_err(),
+    ] {
+        assert!(error.to_string().contains("return_url"), "{error}");
     }
 
     assert!(zb

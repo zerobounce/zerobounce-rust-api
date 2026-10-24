@@ -155,7 +155,10 @@ impl ZeroBounce {
             ("email_batch".to_string(), Value::Array(email_batch)),
         ]);
         if let Some(timeout) = options.timeout {
-            request_body_map.insert("timeout".to_string(), Value::Number(timeout.into()));
+            // LIVE: validatebatch takes timeout as a JSON *string*. Sent as a
+            // number, the API rejects the whole batch with the account-level
+            // "Invalid API Key or your account ran out of credits".
+            request_body_map.insert("timeout".to_string(), Value::String(timeout.to_string()));
         }
         if let Some(activity_data) = options.activity_data {
             request_body_map.insert("activity_data".to_string(), Value::Bool(activity_data));

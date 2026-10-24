@@ -31,46 +31,44 @@ fn post_bulk_root_form(
         .map(|(k, v)| (k.as_str(), v.clone()))
         .collect();
     form.insert("api_key", client.api_key.clone());
-    let response = client.client.post(url).form(&form).send()?;
+    let response = client
+        .client
+        .post(crate::parse_request_url(&url)?)
+        .form(&form)
+        .send()?;
     let body = client.read_api_response(response)?;
     crate::utility::http_error::parse_json_body(&body)
 }
 
 /// POST one of the documented S3 / SFTP file jobs on the bulkapi root.
 ///
-/// `file_name` is optional only for `validateSFTPfile`; every other job requires it.
+/// LIVE: `file_name` and `return_url` are required on every one of these,
+/// including `validateSFTPfile`, which the docs list `file_name` as optional
+/// for. Without either the API answers "This field is required".
 fn bulk_root_file_job(
     client: &ZeroBounce,
     path: &str,
-    file_name: Option<&str>,
+    file_name: &str,
     has_header_row: bool,
     remove_duplicates: Option<bool>,
-    return_url: Option<&str>,
-    file_name_required: bool,
+    return_url: &str,
 ) -> ZBResult<ZBFileFeedback> {
-    match file_name {
-        None if file_name_required => {
-            return Err(ZBError::explicit("empty parameter: file_name"));
-        }
-        Some(name) if name.trim().is_empty() => {
-            return Err(ZBError::explicit("empty parameter: file_name"));
-        }
-        _ => {}
+    if file_name.trim().is_empty() {
+        return Err(ZBError::explicit("empty parameter: file_name"));
+    }
+    if return_url.trim().is_empty() {
+        return Err(ZBError::explicit("empty parameter: return_url"));
     }
 
     let mut fields: HashMap<String, String> = HashMap::new();
     fields.insert("has_header_row".to_string(), has_header_row.to_string());
-    if let Some(name) = file_name {
-        fields.insert("file_name".to_string(), name.to_string());
-    }
+    fields.insert("file_name".to_string(), file_name.to_string());
+    fields.insert("return_url".to_string(), return_url.to_string());
     if let Some(remove_duplicates) = remove_duplicates {
         fields.insert(
             "remove_duplicates".to_string(),
             remove_duplicates.to_string(),
         );
-    }
-    if let Some(return_url) = return_url {
-        fields.insert("return_url".to_string(), return_url.to_string());
     }
     post_bulk_root_form(client, path, fields)
 }
@@ -148,18 +146,33 @@ impl ZeroBounce {
         bulk_root_file_status(self, "domain-search", file_id)
     }
 
-    pub fn send_evaluated_file(
-        &self,
-        file_name: &str,
-        mut reader: impl Read,
-    ) -> ZBResult<ZBFileFeedback> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes)?;
+    /// Submit a finished evaluation for validation. `POST /v2/send-evaluated-file/`
+    ///
+    /// LIVE: this takes the list evaluator's `file_id` as a form field, not the
+    /// file upload the docs describe — an upload is rejected with
+    /// "file_id: This field is required". It returns a new validation job's
+    /// `file_id`, which answers "File cannot be found" for a short while after
+    /// it is accepted.
+    pub fn send_evaluated_file(&self, file_id: &str) -> ZBResult<ZBFileFeedback> {
+        if file_id.trim().is_empty() {
+            return Err(ZBError::explicit("empty parameter: file_id"));
+        }
+        self.require_key()?;
         let url = format!(
             "{}/v2/send-evaluated-file/",
             bulk_api_root(&self.url_provider.bulk_url)
         );
-        post_bulk_root_multipart(self, url, file_name, bytes, HashMap::new())
+        let form = HashMap::from([
+            ("api_key", self.api_key.clone()),
+            ("file_id", file_id.to_string()),
+        ]);
+        let response = self
+            .client
+            .post(crate::parse_request_url(&url)?)
+            .form(&form)
+            .send()?;
+        let body = self.read_api_response(response)?;
+        crate::utility::http_error::parse_json_body(&body)
     }
 
     pub fn send_domain_search_file(
@@ -322,16 +335,15 @@ impl ZeroBounce {
         file_name: &str,
         has_header_row: bool,
         remove_duplicates: Option<bool>,
-        return_url: Option<&str>,
+        return_url: &str,
     ) -> ZBResult<ZBFileFeedback> {
         bulk_root_file_job(
             self,
             "emailFinderS3file",
-            Some(file_name),
+            file_name,
             has_header_row,
             remove_duplicates,
             return_url,
-            true,
         )
     }
 
@@ -341,16 +353,15 @@ impl ZeroBounce {
         file_name: &str,
         has_header_row: bool,
         remove_duplicates: Option<bool>,
-        return_url: Option<&str>,
+        return_url: &str,
     ) -> ZBResult<ZBFileFeedback> {
         bulk_root_file_job(
             self,
             "domainSearchS3file",
-            Some(file_name),
+            file_name,
             has_header_row,
             remove_duplicates,
             return_url,
-            true,
         )
     }
 
@@ -358,14 +369,14 @@ impl ZeroBounce {
 
     /// Validate a file from your SFTP/FTP server (POST /validateSFTPfile).
     ///
-    /// The docs list `file_name` as optional here alone; pass `None` to use the input
-    /// bucket configured in your ZeroBounce settings.
+    /// LIVE: `file_name` is required here too, although the docs list it as
+    /// optional for this one endpoint.
     pub fn validate_sftp_file(
         &self,
-        file_name: Option<&str>,
+        file_name: &str,
         has_header_row: bool,
         remove_duplicates: Option<bool>,
-        return_url: Option<&str>,
+        return_url: &str,
     ) -> ZBResult<ZBFileFeedback> {
         bulk_root_file_job(
             self,
@@ -374,7 +385,6 @@ impl ZeroBounce {
             has_header_row,
             remove_duplicates,
             return_url,
-            false,
         )
     }
 
@@ -386,16 +396,15 @@ impl ZeroBounce {
         file_name: &str,
         has_header_row: bool,
         remove_duplicates: Option<bool>,
-        return_url: Option<&str>,
+        return_url: &str,
     ) -> ZBResult<ZBFileFeedback> {
         bulk_root_file_job(
             self,
             "scoreSFTPfile",
-            Some(file_name),
+            file_name,
             has_header_row,
             remove_duplicates,
             return_url,
-            true,
         )
     }
 
@@ -405,16 +414,15 @@ impl ZeroBounce {
         file_name: &str,
         has_header_row: bool,
         remove_duplicates: Option<bool>,
-        return_url: Option<&str>,
+        return_url: &str,
     ) -> ZBResult<ZBFileFeedback> {
         bulk_root_file_job(
             self,
             "emailFinderSFTPfile",
-            Some(file_name),
+            file_name,
             has_header_row,
             remove_duplicates,
             return_url,
-            true,
         )
     }
 
@@ -424,16 +432,15 @@ impl ZeroBounce {
         file_name: &str,
         has_header_row: bool,
         remove_duplicates: Option<bool>,
-        return_url: Option<&str>,
+        return_url: &str,
     ) -> ZBResult<ZBFileFeedback> {
         bulk_root_file_job(
             self,
             "domainSearchSFTPfile",
-            Some(file_name),
+            file_name,
             has_header_row,
             remove_duplicates,
             return_url,
-            true,
         )
     }
 
