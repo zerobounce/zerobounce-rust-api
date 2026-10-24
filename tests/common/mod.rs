@@ -3,7 +3,7 @@ use zero_bounce::{ZBUrlProvider, ZeroBounce, ZBFile};
 
 pub(crate) const EMAIL: &str = "example@example.com";
 pub(crate) const MOCK_API_KEY: &str = "mock_api_key";
-pub(crate) const INVALID_URL: &str = "http://255.255.255.255";
+pub(crate) const INVALID_URL: &str = "https://255.255.255.255";
 pub(crate) const SANDBOX_IP: &str = "99.110.204.1";
 
 pub(crate) fn instantiate<'s>() -> (ServerGuard, ZeroBounce) {
@@ -12,7 +12,10 @@ pub(crate) fn instantiate<'s>() -> (ServerGuard, ZeroBounce) {
     let mock_url: String = mock_server.url().to_owned();
 
     let mock_url_provider = ZBUrlProvider {
-        url: mock_url.clone(), bulk_url: mock_url.clone()
+        url: mock_url.clone(),
+        bulk_url: mock_url.clone(),
+        list_evaluator_url: mock_url.clone(),
+        inbox_placement_url: mock_url.clone(),
     };
     let zb_instance = ZeroBounce {
         api_key: MOCK_API_KEY.to_string().clone(),
@@ -35,6 +38,8 @@ pub(crate) fn invalid_url_zb_instance() -> ZeroBounce {
         url_provider: ZBUrlProvider {
             url: INVALID_URL.to_owned(),
             bulk_url: INVALID_URL.to_owned(),
+            list_evaluator_url: INVALID_URL.to_owned(),
+            inbox_placement_url: INVALID_URL.to_owned(),
         },
     }
 }

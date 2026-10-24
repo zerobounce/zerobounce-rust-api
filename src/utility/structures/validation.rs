@@ -10,11 +10,14 @@ pub struct ZBValidation {
     pub address: String,
     pub status: String,
     pub sub_status: String,
+    #[serde(default)]
     pub free_email: bool,
     pub did_you_mean: Option<String>,
     pub account: Option<String>,
     pub domain: Option<String>,
     pub domain_age_days: Option<String>,
+    pub active_in_days: Option<String>,
+    pub active_first_seen: Option<String>,
     pub smtp_provider: Option<String>,
     pub catchall_domain: Option<bool>,
     pub mx_record: Option<String>,
@@ -27,7 +30,21 @@ pub struct ZBValidation {
     pub city: Option<String>,
     pub zipcode: Option<String>,
 
-    #[serde(deserialize_with="deserialize_naive_date")]
+    /// With `domain_info`: whether the domain has a website ("True", "False" or "unchecked").
+    pub domain_website_exists: Option<String>,
+
+    /// With `domain_info`: the WHOIS registrant company, "Registrant info not found"
+    /// or "unchecked".
+    pub domain_registrant_company_name: Option<String>,
+
+    /// Set instead of a result while greylist processing is still running; validate
+    /// again later to pick it up. The API spells this key "Message".
+    #[serde(rename = "Message")]
+    pub message: Option<String>,
+
+    /// A greylist pickup that is still running carries no timestamp, so this
+    /// defaults rather than failing the whole response.
+    #[serde(default, deserialize_with="deserialize_naive_date")]
     pub processed_at: NaiveDateTime,
 }
 

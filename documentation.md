@@ -51,6 +51,116 @@ let zb = ZeroBounce::with_base_url("your_api_key", "https://custom-api.example.c
 
 See the [config_options example](https://github.com/zerobounce/zerobounce-rust-api/tree/main/examples/config_options.rs) for a complete demonstration of all configuration options.
 
+## Validate options
+
+```rust
+use zero_bounce::utility::structures::validate_options::ZBValidateOptions;
+use zero_bounce::ZeroBounce;
+
+let zb = ZeroBounce::new("<YOUR_API_KEY>");
+
+let options = ZBValidateOptions {
+    // domain_info adds domain_website_exists and domain_registrant_company_name.
+    domain_info: Some(true),
+    // greylist_processing re-runs a greylisted address instead of returning unknown.
+    greylist_processing: Some(true),
+    // callback_url is only allowed together with greylist_processing: Some(true).
+    callback_url: Some("https://example.com/zerobounce-callback".to_string()),
+    ..Default::default()
+};
+
+let validation = zb.validate_email_with_options("someone@example.com", "", &options)?;
+
+// While the greylist retry is still running the API returns a message instead
+// of a result; validate again in about 30 minutes to pick it up.
+println!("{:?} {:?}", validation.message, validation.domain_website_exists);
+```
+
+## Inbox Placement Tester
+
+Lives on `https://bulkapi.zerobounce.net/api/ipt` and spends inbox test credits.
+
+```rust
+use zero_bounce::api::inbox_placement::{
+    CreateInboxPlacementTestOptions, ListInboxPlacementTestsOptions,
+};
+use zero_bounce::ZeroBounce;
+
+let zb = ZeroBounce::new("<YOUR_API_KEY>");
+
+let providers = zb.get_inbox_placement_providers()?;
+let test_types = zb.get_inbox_placement_test_types()?;
+
+// test_type 1 (Email) needs sender_email; 2 is Unique ID and 3 is Auto Alias.
+let created = zb.create_inbox_placement_test(
+    "October campaign", // required, at most 64 characters
+    &CreateInboxPlacementTestOptions {
+        test_type: Some(1),
+        sender_email: Some("news@example.com".to_string()),
+        webhook_url: Some("https://example.com/ipt-webhook".to_string()),
+        ..Default::default()
+    },
+)?;
+
+// Send your campaign to the seeds in `created`, then read the results.
+let result = zb.get_inbox_placement_test("123")?;
+
+let tests = zb.list_inbox_placement_tests(&ListInboxPlacementTestsOptions {
+    status: Some("finished".to_string()),
+    page: Some(1),
+    page_size: Some(25),
+    ..Default::default()
+})?;
+
+zb.set_inbox_placement_webhook("https://example.com/ipt-webhook")?;
+let webhook = zb.get_inbox_placement_webhook()?;
+zb.delete_inbox_placement_test("123")?;
+```
+
+## S3 and SFTP/FTP bulk
+
+Queue a job on a file that already sits in your Amazon S3 bucket, or on your
+SFTP/FTP server. See the [S3](https://www.zerobounce.net/docs/api-integrations/amazon-s3-bulk-api)
+and [SFTP](https://www.zerobounce.net/docs/api-integrations/sftp_bulk_api) docs.
+
+```rust
+let zb = ZeroBounce::new("<YOUR_API_KEY>");
+
+// Amazon S3. file_name is the full path, as returned by list_s3_files.
+zb.email_finder_s3_file("lists/leads.csv", true, None, None)?;
+zb.domain_search_s3_file(
+    "lists/leads.csv",
+    true,
+    Some(true),                                // remove_duplicates
+    Some("https://example.com/zerobounce-done"), // return_url
+)?;
+
+// SFTP/FTP. The server, path and protocol come from your ZeroBounce settings.
+// file_name is optional for validate_sftp_file alone — None uses the input
+// bucket from those settings.
+zb.validate_sftp_file(None, true, None, None)?;
+zb.score_sftp_file("my_file.txt", true, None, None)?;
+zb.email_finder_sftp_file("my_file.txt", true, None, None)?;
+zb.domain_search_sftp_file("my_file.txt", true, None, None)?;
+
+// Note the field: this one takes export_path, not export_bucket.
+// None uses the export path from your settings.
+zb.export_sftp_file("<FILE_ID>", Some("/exports"))?;
+```
+
+## Per-API base URLs
+
+The list evaluator and the Inbox Placement Tester have their own base URLs,
+separate from the main and bulk hosts.
+
+```rust
+let mut zb = ZeroBounce::new("<YOUR_API_KEY>");
+zb.url_provider.list_evaluator_url =
+    "https://bulkapi.zerobounce.net/v2/listevaluator".to_string();
+zb.url_provider.inbox_placement_url =
+    "https://bulkapi.zerobounce.net/api/ipt".to_string();
+```
+
 ## Email Finding Methods
 
 ### find_email_v2 (Recommended)

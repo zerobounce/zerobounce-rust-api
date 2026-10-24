@@ -14,9 +14,18 @@ documentation = "https://docs.rs/zero-bounce"
 [dependencies]
 bytes = "1.4.0"
 chrono = "0.4.24"
-reqwest = { version = "0.13.2", features = ["blocking", "multipart", "query"] }
+reqwest = { version = "0.13.2", features = ["blocking", "multipart", "query", "form"] }
 serde = { version ="1.0.159", features = ["derive"] }
 serde_json = "1.0.95"
+
+[features]
+# The live API suite. Off by default, so `cargo test` and CI never touch the
+# network: run it with `cargo test --features live --test live_api`.
+live = []
+
+[[test]]
+name = "live_api"
+required-features = ["live"]
 
 [dev-dependencies]
 mockito = "1.0.2"
