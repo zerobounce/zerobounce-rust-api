@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use chrono::NaiveDate;
 use zero_bounce::utility::structures::bulk::{
-    zb_download_type, ZBBulkResponse, ZBFile, ZBGetFileOptions,
+    zb_download_type, ZBBulkResponse, ZBEmailFinderFileOptions, ZBFile, ZBGetFileOptions,
 };
 use zero_bounce::utility::structures::validate_options::ZBValidateOptions;
 use zero_bounce::api::inbox_placement::{
@@ -703,6 +703,18 @@ fn files_scoring_and_priority3() {
     );
     assert!(!request.fields.contains_key("domain"));
     assert!(!request.fields.contains_key("last_name"));
+    // first_name is optional on /guessformat; unset, it is left off the query.
+    zb.find_email_v2()
+        .domain("example.com")
+        .last_name("Doe")
+        .call()
+        .unwrap();
+    let request = only(&fake);
+    assert!(!request.fields.contains_key("first_name"));
+    assert_eq!(
+        request.fields.get("last_name").map(String::as_str),
+        Some("Doe")
+    );
     assert_eq!(
         zb.domain_search_v2()
             .domain("example.com")
@@ -723,8 +735,16 @@ fn files_scoring_and_priority3() {
     );
     assert!(!request.fields.contains_key("domain"));
 
-    zb.send_email_finder_file(1, "finder.csv", &b"example.com\n"[..])
-        .unwrap();
+    zb.send_email_finder_file(
+        1,
+        &ZBEmailFinderFileOptions {
+            first_name_column: Some(2),
+            ..Default::default()
+        },
+        "finder.csv",
+        &b"example.com\n"[..],
+    )
+    .unwrap();
     let request = only(&fake);
     assert!(
         request.path.ends_with("/email-finder/sendfile"),
@@ -737,7 +757,7 @@ fn files_scoring_and_priority3() {
     );
     zb.email_finder_file_status("fid").unwrap();
     assert!(only(&fake).path.ends_with("/email-finder/filestatus"));
-    zb.send_domain_search_file(2, "domains.csv", &b"example.com\n"[..])
+    zb.send_domain_search_file(2, None, "domains.csv", &b"example.com\n"[..])
         .unwrap();
     let request = only(&fake);
     assert!(request.path.ends_with("/domain-search/sendfile"));
@@ -782,13 +802,15 @@ fn files_scoring_and_priority3() {
     zb.delete_filter("exclude", "domain", "example.com")
         .unwrap();
     assert!(only(&fake).path.ends_with("/filters/delete"));
-    zb.validate_s3_file("inbox.csv").unwrap();
+    zb.validate_s3_file("inbox.csv", true, None, "https://example.com/done")
+        .unwrap();
     assert!(only(&fake).path.ends_with("/validateS3file"));
-    zb.score_s3_file("inbox.csv").unwrap();
+    zb.score_s3_file("inbox.csv", true, None, "https://example.com/done")
+        .unwrap();
     let request = only(&fake);
     assert!(request.path.ends_with("/scoreS3file"));
     assert!(!request.fields.contains_key("email_address_column"));
-    zb.export_s3_file("fid", "bucket-out").unwrap();
+    zb.export_s3_file("fid", Some("bucket-out")).unwrap();
     let request = only(&fake);
     assert_eq!(
         request.fields.get("export_bucket").map(String::as_str),
@@ -809,6 +831,149 @@ fn files_scoring_and_priority3() {
         request.fields.get("search").map(String::as_str),
         Some("csv")
     );
+}
+
+#[test]
+fn bulk_finder_and_domain_search_files_send_and_omit_the_documented_fields() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "finder-key");
+
+    zb.send_email_finder_file(
+        3,
+        &ZBEmailFinderFileOptions {
+            first_name_column: Some(1),
+            full_name_column: Some(5),
+            middle_name_column: Some(2),
+            last_name_column: Some(4),
+            has_header_row: Some(true),
+        },
+        "leads.csv",
+        &b"example.com\n"[..],
+    )
+    .unwrap();
+    let request = only(&fake);
+    assert_eq!(request.method, "POST");
+    assert!(
+        request.path.ends_with("/email-finder/sendfile"),
+        "{}",
+        request.path
+    );
+    for (field, value) in [
+        ("domain_column", "3"),
+        ("first_name_column", "1"),
+        ("full_name_column", "5"),
+        ("middle_name_column", "2"),
+        ("last_name_column", "4"),
+        // Booleans go on the wire as the strings "true"/"false".
+        ("has_header_row", "true"),
+    ] {
+        assert_eq!(request.fields.get(field).map(String::as_str), Some(value));
+    }
+
+    // Unset columns stay off the request entirely. Some(0) is still sent.
+    zb.send_email_finder_file(
+        1,
+        &ZBEmailFinderFileOptions {
+            full_name_column: Some(0),
+            ..Default::default()
+        },
+        "leads.csv",
+        &b"example.com\n"[..],
+    )
+    .unwrap();
+    let request = only(&fake);
+    assert_eq!(
+        request.fields.get("full_name_column").map(String::as_str),
+        Some("0")
+    );
+    for field in [
+        "first_name_column",
+        "middle_name_column",
+        "last_name_column",
+        "has_header_row",
+    ] {
+        assert!(!request.fields.contains_key(field), "{field}");
+    }
+
+    zb.send_domain_search_file(2, Some(false), "domains.csv", &b"example.com\n"[..])
+        .unwrap();
+    let request = only(&fake);
+    assert!(request.path.ends_with("/domain-search/sendfile"));
+    assert_eq!(
+        request.fields.get("has_header_row").map(String::as_str),
+        Some("false")
+    );
+    zb.send_domain_search_file(2, None, "domains.csv", &b"example.com\n"[..])
+        .unwrap();
+    assert!(!only(&fake).fields.contains_key("has_header_row"));
+}
+
+#[test]
+fn bulk_finder_and_domain_search_getfile_and_deletefile_use_the_bulk_root() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "finder-key");
+
+    let ZBBulkResponse::Content(content) = zb.email_finder_result_fetch("fid-1").unwrap() else {
+        panic!("expected Content");
+    };
+    assert_eq!(content.as_ref(), b"email\nfinder-key@example.com\n");
+    let request = only(&fake);
+    assert_eq!(request.method, "GET");
+    // These sit on the bulk host without the /v2 the other bulk APIs use.
+    assert!(
+        request.path.ends_with("/bulk/email-finder/getfile"),
+        "{}",
+        request.path
+    );
+    assert_eq!(
+        request.fields.get("file_id").map(String::as_str),
+        Some("fid-1")
+    );
+    assert_eq!(request.api_key, "finder-key");
+    // getfile for these two takes no download_type or activity_data.
+    assert!(!request.fields.contains_key("activity_data"));
+    assert!(!request.fields.contains_key("download_type"));
+
+    zb.domain_search_result_fetch("fid-2").unwrap();
+    let request = only(&fake);
+    assert!(
+        request.path.ends_with("/bulk/domain-search/getfile"),
+        "{}",
+        request.path
+    );
+    assert_eq!(
+        request.fields.get("file_id").map(String::as_str),
+        Some("fid-2")
+    );
+
+    let feedback = zb.email_finder_result_delete("fid-3").unwrap();
+    assert!(feedback.success);
+    let request = only(&fake);
+    assert_eq!(request.method, "GET");
+    assert!(
+        request.path.ends_with("/bulk/email-finder/deletefile"),
+        "{}",
+        request.path
+    );
+    assert_eq!(
+        request.fields.get("file_id").map(String::as_str),
+        Some("fid-3")
+    );
+
+    zb.domain_search_result_delete("fid-4").unwrap();
+    let request = only(&fake);
+    assert!(
+        request.path.ends_with("/bulk/domain-search/deletefile"),
+        "{}",
+        request.path
+    );
+
+    // An HTML access-denied page is a short error, not file bytes.
+    let err = client(port, "html-200-finder")
+        .email_finder_result_fetch("fid-1")
+        .unwrap_err();
+    assert_short(&err);
+    assert!(err.to_string().contains("Access denied"));
 }
 
 #[test]
@@ -858,6 +1023,50 @@ fn s3_and_sftp_file_jobs_send_the_documented_fields_only() {
         request.fields.get("return_url").map(String::as_str),
         Some("https://example.com/done")
     );
+
+    // 31 and 32 go through the same helper as their SFTP twins, so they send
+    // has_header_row, remove_duplicates and return_url rather than file_name alone.
+    zb.validate_s3_file("lists/leads.csv", false, Some(false), "https://example.com/done")
+        .unwrap();
+    let request = only(&fake);
+    assert!(
+        request.path.ends_with("/validateS3file"),
+        "{}",
+        request.path
+    );
+    assert_eq!(
+        request.fields.get("has_header_row").map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        request.fields.get("remove_duplicates").map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        request.fields.get("return_url").map(String::as_str),
+        Some("https://example.com/done")
+    );
+
+    zb.score_s3_file("lists/leads.csv", true, None, "https://example.com/done")
+        .unwrap();
+    let request = only(&fake);
+    assert!(request.path.ends_with("/scoreS3file"), "{}", request.path);
+    assert_eq!(
+        request.fields.get("has_header_row").map(String::as_str),
+        Some("true")
+    );
+    assert!(!request.fields.contains_key("remove_duplicates"));
+    assert_eq!(
+        request.fields.get("return_url").map(String::as_str),
+        Some("https://example.com/done")
+    );
+
+    // export_bucket is optional: without it the account's export settings apply.
+    zb.export_s3_file("fid", None).unwrap();
+    let request = only(&fake);
+    assert!(request.path.ends_with("/exportS3file"), "{}", request.path);
+    assert!(!request.fields.contains_key("export_bucket"));
+    assert_eq!(request.fields.get("file_id").map(String::as_str), Some("fid"));
 
     // LIVE: file_name is required here too, although the docs list it as
     // optional for this one endpoint.
@@ -919,6 +1128,8 @@ fn s3_and_sftp_file_jobs_reject_invalid_arguments_before_a_request() {
         zb.email_finder_sftp_file("", true, None, done).unwrap_err(),
         zb.domain_search_sftp_file("", true, None, done).unwrap_err(),
         zb.validate_sftp_file(" ", true, None, done).unwrap_err(),
+        zb.validate_s3_file("", true, None, done).unwrap_err(),
+        zb.score_s3_file("  ", true, None, done).unwrap_err(),
     ] {
         assert!(error.to_string().contains("file_name"), "{error}");
     }
@@ -931,6 +1142,9 @@ fn s3_and_sftp_file_jobs_reject_invalid_arguments_before_a_request() {
         zb.score_sftp_file("f.csv", true, None, "").unwrap_err(),
         zb.email_finder_sftp_file("f.csv", true, None, "").unwrap_err(),
         zb.domain_search_sftp_file("f.csv", true, None, "").unwrap_err(),
+        // LIVE: the S3 validate and score jobs reject a job with no return_url too.
+        zb.validate_s3_file("f.csv", true, None, "").unwrap_err(),
+        zb.score_s3_file("f.csv", true, None, " ").unwrap_err(),
     ] {
         assert!(error.to_string().contains("return_url"), "{error}");
     }
@@ -945,6 +1159,16 @@ fn s3_and_sftp_file_jobs_reject_invalid_arguments_before_a_request() {
         .unwrap_err()
         .to_string()
         .contains("export_path"));
+    assert!(zb
+        .export_s3_file("  ", None)
+        .unwrap_err()
+        .to_string()
+        .contains("file_id"));
+    assert!(zb
+        .export_s3_file("fid", Some(" "))
+        .unwrap_err()
+        .to_string()
+        .contains("export_bucket"));
 
     assert_eq!(fake.len(), 0);
 }
@@ -979,7 +1203,7 @@ fn invalid_arguments_are_rejected_before_a_request() {
         .to_string()
         .contains("api_key"));
     assert!(empty
-        .send_domain_search_file(1, "d.csv", &b"a\n"[..])
+        .send_domain_search_file(1, None, "d.csv", &b"a\n"[..])
         .unwrap_err()
         .to_string()
         .contains("api_key"));
@@ -1001,12 +1225,26 @@ fn invalid_arguments_are_rejected_before_a_request() {
         .to_string()
         .contains("timeout"));
     assert!(zb
-        .send_email_finder_file(0, "f.csv", &b"a\n"[..])
+        .send_email_finder_file(
+            0,
+            &ZBEmailFinderFileOptions {
+                first_name_column: Some(2),
+                ..Default::default()
+            },
+            "f.csv",
+            &b"a\n"[..]
+        )
         .unwrap_err()
         .to_string()
         .contains("domain_column"));
+    // A finder file with no name column at all is rejected before a request.
     assert!(zb
-        .validate_s3_file("  ")
+        .send_email_finder_file(1, &ZBEmailFinderFileOptions::default(), "f.csv", &b"a\n"[..])
+        .unwrap_err()
+        .to_string()
+        .contains("full_name_column"));
+    assert!(zb
+        .validate_s3_file("  ", true, None, "https://example.com/done")
         .unwrap_err()
         .to_string()
         .contains("file_name"));

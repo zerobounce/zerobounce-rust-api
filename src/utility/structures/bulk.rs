@@ -52,6 +52,19 @@ pub struct ZBGetFileOptions {
     pub activity_data: Option<bool>,
 }
 
+/// Optional columns for bulk email finder `sendfile`.
+///
+/// `first_name_column` or `full_name_column` is required; the API rejects a file
+/// that carries neither. The rest are omitted when `None`, and `Some(0)` is sent.
+#[derive(Clone, Debug, Default)]
+pub struct ZBEmailFinderFileOptions {
+    pub first_name_column: Option<u32>,
+    pub full_name_column: Option<u32>,
+    pub middle_name_column: Option<u32>,
+    pub last_name_column: Option<u32>,
+    pub has_header_row: Option<bool>,
+}
+
 pub enum ZBBulkResponse {
     Content(Bytes),
     Feedback(ZBFileFeedback),

@@ -45,15 +45,18 @@ impl ZeroBounce {
         crate::utility::http_error::parse_json_body(&response_content)
     }
 
-    fn generic_result_fetch(
+    /// Bulk `getfile` against a full URL.
+    ///
+    /// The bulk email finder and domain search live on the bulk host without the
+    /// `/v2` path, so they build their own URL and share this body.
+    pub(crate) fn result_fetch_at(
         &self,
-        endpoint: &str,
+        url: String,
         file_id: &str,
         options: Option<&ZBGetFileOptions>,
         is_scoring: bool,
     ) -> ZBResult<ZBBulkResponse> {
         self.require_key()?;
-        let url = self.url_provider.bulk_url_of(endpoint);
         let mut query: Vec<(&str, String)> = vec![
             ("api_key", self.api_key.clone()),
             ("file_id", file_id.to_string()),
@@ -126,13 +129,32 @@ impl ZeroBounce {
         Ok(ZBBulkResponse::Content(body_bytes))
     }
 
-    fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback> {
+    fn generic_result_fetch(
+        &self,
+        endpoint: &str,
+        file_id: &str,
+        options: Option<&ZBGetFileOptions>,
+        is_scoring: bool,
+    ) -> ZBResult<ZBBulkResponse> {
+        self.result_fetch_at(
+            self.url_provider.bulk_url_of(endpoint),
+            file_id,
+            options,
+            is_scoring,
+        )
+    }
+
+    /// Bulk `deletefile` against a full URL. See [`result_fetch_at`](Self::result_fetch_at).
+    pub(crate) fn result_delete_at(&self, url: String, file_id: &str) -> ZBResult<ZBFileFeedback> {
         let query_args = HashMap::from([("file_id", file_id)]);
 
-        let response_content =
-            self.generic_get_request(self.url_provider.bulk_url_of(endpoint), query_args)?;
+        let response_content = self.generic_get_request(url, query_args)?;
 
         crate::utility::http_error::parse_json_body(&response_content)
+    }
+
+    fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback> {
+        self.result_delete_at(self.url_provider.bulk_url_of(endpoint), file_id)
     }
 
     pub fn bulk_validation_file_submit(&self, zb_file: &ZBFile) -> ZBResult<ZBFileFeedback> {
