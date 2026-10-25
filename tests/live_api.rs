@@ -247,6 +247,60 @@ fn validation_free() {
         }
     }());
 
+    check("LIVE: the S3 validate and score jobs want return_url too", || -> Result<(), String> {
+        for (what, message) in [
+            ("validate_s3_file", expect_failure("validate_s3_file without return_url", || {
+                zb.validate_s3_file("f.csv", true, None, "")
+            })?),
+            ("score_s3_file", expect_failure("score_s3_file without return_url", || {
+                zb.score_s3_file("f.csv", true, None, "")
+            })?),
+        ] {
+            if !message.contains("return_url") {
+                return Err(format!("{what}: unexpected message: {message}"));
+            }
+        }
+        Ok(())
+    }());
+
+    // Reads and a delete of a file id that does not exist: no credits, no change.
+    check("LIVE: bulk finder and domain search getfile answer an unknown id", || -> Result<(), String> {
+        for what in ["email_finder_result_fetch", "domain_search_result_fetch"] {
+            let result = if what.starts_with("email_finder") {
+                zb.email_finder_result_fetch(UNKNOWN_ID)
+            } else {
+                zb.domain_search_result_fetch(UNKNOWN_ID)
+            };
+            match result {
+                // An account with no finished file answers with an error, not bytes.
+                Ok(_) => return Err(format!("{what}: an unknown id returned content")),
+                Err(error) => {
+                    let message = redact(&error.to_string());
+                    if message.len() >= 500 || message.contains("<html") {
+                        return Err(format!("{what}: message not short and clean: {message}"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }());
+
+    check("LIVE: bulk finder and domain search deletefile answer an unknown id", || -> Result<(), String> {
+        for (what, message) in [
+            ("email_finder_result_delete", expect_failure("email_finder_result_delete", || {
+                zb.email_finder_result_delete(UNKNOWN_ID)
+            })?),
+            ("domain_search_result_delete", expect_failure("domain_search_result_delete", || {
+                zb.domain_search_result_delete(UNKNOWN_ID)
+            })?),
+        ] {
+            if message.len() >= 500 || message.contains("<html") {
+                return Err(format!("{what}: message not short and clean: {message}"));
+            }
+        }
+        Ok(())
+    }());
+
     check("filters list", zb.list_filters(false).map(|_| ()).map_err(|e| e.to_string()));
 
     check(

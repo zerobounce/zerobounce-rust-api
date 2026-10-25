@@ -176,8 +176,9 @@ impl ZeroBounce {
     /// Returns a builder that allows you to set parameters using method chaining.
     /// 
     /// # Requirements
-    /// - `first_name` is mandatory
     /// - Exactly one of `domain` or `company_name` must be provided (XOR requirement)
+    /// - `first_name` is optional; without it the API answers with the domain's
+    ///   address formats, the same as `domain_search_v2`
     /// 
     /// # Example
     /// ```no_run
@@ -260,7 +261,7 @@ impl ZeroBounce {
 }
 
 impl<'a> FindEmailV2Builder<'a> {
-    /// Set the first name (mandatory).
+    /// Set the first name (optional).
     pub fn first_name(mut self, name: &'a str) -> Self {
         self.first_name = Some(name);
         self
@@ -292,9 +293,9 @@ impl<'a> FindEmailV2Builder<'a> {
 
     /// Execute the API call and return the result.
     pub fn call(self) -> ZBResult<FindEmailResponseV2> {
-        let first_name = self.first_name.ok_or_else(|| ZBError::explicit("first_name is mandatory and must be set"))?;
-        
-        if first_name.is_empty() {
+        // first_name is optional: /guessformat answers with the domain's formats
+        // when no name is given. Setting it to an empty string is still a mistake.
+        if let Some("") = self.first_name {
             return Err(ZBError::explicit("first_name cannot be empty"));
         }
 
@@ -318,9 +319,11 @@ impl<'a> FindEmailV2Builder<'a> {
             }
         }
 
-        let mut query_args = HashMap::from([
-            ("first_name", first_name),
-        ]);
+        let mut query_args = HashMap::new();
+
+        if let Some(first) = self.first_name {
+            query_args.insert("first_name", first);
+        }
 
         if let Some(d) = self.domain {
             query_args.insert("domain", d);

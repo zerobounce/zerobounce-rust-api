@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ZBValidateOptions` for single validation: `timeout`, `activity_data`, `verify_plus`, and `use_post` (form-encoded `POST /v2/validate`). The same options apply to `batch_validate_with_options`.
 - `score_email` (`GET /v2/scoring`) and `score_email_post` (form-encoded `POST /v2/scoring`).
 - Bulk email finder, bulk domain search, list evaluator, filters, and S3 bulk (`validate_s3_file`, `score_s3_file`, `export_s3_file`, `list_s3_files`, `email_finder_s3_file`, `domain_search_s3_file`).
+- Bulk email finder and bulk domain search `getfile` and `deletefile`: `email_finder_result_fetch`, `email_finder_result_delete`, `domain_search_result_fetch`, `domain_search_result_delete`. They follow the same rules as `bulk_validation_result_fetch` / `bulk_validation_result_delete`: the file bytes come back as `ZBBulkResponse::Content`, and a JSON body, including an HTTP 200 carrying `{"success": false}`, is an error.
+- `ZBEmailFinderFileOptions` for bulk email finder `sendfile`: `first_name_column`, `full_name_column`, `middle_name_column`, `last_name_column`, and `has_header_row`.
 - SFTP/FTP bulk: `validate_sftp_file`, `score_sftp_file`, `email_finder_sftp_file`, `domain_search_sftp_file`, and `export_sftp_file`. The server, path and protocol come from your ZeroBounce settings. `validate_sftp_file` takes `file_name` as `Option` because the docs list it as optional there alone; `export_sftp_file` takes `export_path` rather than the `export_bucket` `export_s3_file` uses.
 - `ZBValidateOptions` accepts `domain_info`, `greylist_processing`, and `callback_url`. `callback_url` needs `greylist_processing: Some(true)` and is rejected without it, and when blank, before a request is sent.
 - `ZBValidation` carries `domain_website_exists`, `domain_registrant_company_name`, and `message`. `message` is read from the API's `Message` key, returned while greylist processing is still running.
@@ -23,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `send_email_finder_file` takes a `&ZBEmailFinderFileOptions` and sends the name columns and `has_header_row`, which it never sent before. It requires one of `first_name_column` or `full_name_column`: the API cannot work out a person from a domain alone, and rejects a file that carries neither.
+- `send_domain_search_file` takes `has_header_row` and sends it. Unset (`None`), it is omitted and the account default applies; before, it could not be sent at all, so a file with a header row had its first row searched.
+- `validate_s3_file` and `score_s3_file` take `has_header_row`, `remove_duplicates`, and `return_url`, and send them, like their SFTP twins already did. They sent `file_name` alone, which the live API rejects: `return_url` is required, so it is a `&str` rather than an `Option`.
+- `export_s3_file` takes `export_bucket` as an `Option<&str>`. It is optional — `None` uses the export bucket from your ZeroBounce settings — and was wrongly rejected when empty, matching `export_sftp_file`.
+- `find_email_v2` no longer requires `first_name`. The API treats it as optional and answers with the domain's address formats without it. An explicitly empty `first_name` is still rejected, and `domain_search_v2` is unchanged.
 - List evaluator requests use `ZBUrlProvider::list_evaluator_url` instead of building the path from the bulk base, and the file id is URL-encoded as one path segment. `send_evaluated_file` stays on the bulk base.
 
 - API requests time out after 120 seconds and do not follow redirects.

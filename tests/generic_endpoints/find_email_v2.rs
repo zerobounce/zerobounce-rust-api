@@ -265,3 +265,45 @@ fn test_find_email_v2_invalid_response() {
     assert_eq!(response.confidence, "undetermined");
 }
 
+
+#[test]
+fn test_find_email_v2_without_first_name() {
+    let (mut mock_server, zb_instance) = instantiate();
+
+    // first_name is optional on /guessformat: without it the API answers with
+    // the domain's address formats. Only domain or company_name is required.
+    // That first_name is left off the query entirely is asserted in
+    // tests/offline_api.rs, which records the parameters it receives.
+    let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_EMAIL_FINDER))
+        .with_status(200)
+        .with_header("content-type", CONTENT_TYPE_JSON)
+        .with_body(mock_constants::MOCK_FIND_EMAIL_V2_DOMAIN_VALID)
+        .match_query(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::UrlEncoded("api_key".to_string(), "mock_api_key".to_string()),
+            mockito::Matcher::UrlEncoded("domain".to_string(), "example.com".to_string()),
+            mockito::Matcher::UrlEncoded("last_name".to_string(), "Doe".to_string()),
+        ]))
+        .create();
+
+    let result = zb_instance.find_email_v2()
+        .domain("example.com")
+        .last_name("Doe")
+        .call();
+    assert!(result.is_ok(), "{:#?}", result.err());
+    mock.assert();
+
+    let response = result.unwrap();
+    assert_eq!(response.email, "john.doe@example.com");
+}
+
+#[test]
+fn test_find_email_v2_without_first_name_still_needs_domain_or_company() {
+    let (mut _mock_server, zb_instance) = instantiate();
+
+    let result = zb_instance.find_email_v2().last_name("Doe").call();
+    let zb_error = result.unwrap_err();
+    let ZBError::ExplicitError(msg) = zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
+    };
+    assert!(msg.contains("either domain or company_name"));
+}

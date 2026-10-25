@@ -127,26 +127,85 @@ and [SFTP](https://www.zerobounce.net/docs/api-integrations/sftp_bulk_api) docs.
 let zb = ZeroBounce::new("<YOUR_API_KEY>");
 
 // Amazon S3. file_name is the full path, as returned by list_s3_files.
-zb.email_finder_s3_file("lists/leads.csv", true, None, None)?;
-zb.domain_search_s3_file(
+// Every job takes file_name, has_header_row, remove_duplicates and return_url.
+// The live API rejects a job with no return_url, so it is required here.
+zb.validate_s3_file(
     "lists/leads.csv",
-    true,
-    Some(true),                                // remove_duplicates
-    Some("https://example.com/zerobounce-done"), // return_url
+    true,                                        // has_header_row
+    Some(true),                                  // remove_duplicates
+    "https://example.com/zerobounce-done",       // return_url
 )?;
+zb.score_s3_file("lists/leads.csv", true, None, "https://example.com/zerobounce-done")?;
+zb.email_finder_s3_file("lists/leads.csv", true, None, "https://example.com/zerobounce-done")?;
+zb.domain_search_s3_file("lists/leads.csv", true, None, "https://example.com/zerobounce-done")?;
+
+// Export back to S3. None uses the export bucket from your ZeroBounce settings.
+zb.export_s3_file("<FILE_ID>", Some("my-export-bucket"))?;
+zb.export_s3_file("<FILE_ID>", None)?;
 
 // SFTP/FTP. The server, path and protocol come from your ZeroBounce settings.
-// file_name is optional for validate_sftp_file alone — None uses the input
-// bucket from those settings.
-zb.validate_sftp_file(None, true, None, None)?;
-zb.score_sftp_file("my_file.txt", true, None, None)?;
-zb.email_finder_sftp_file("my_file.txt", true, None, None)?;
-zb.domain_search_sftp_file("my_file.txt", true, None, None)?;
+zb.validate_sftp_file("my_file.txt", true, None, "https://example.com/zerobounce-done")?;
+zb.score_sftp_file("my_file.txt", true, None, "https://example.com/zerobounce-done")?;
+zb.email_finder_sftp_file("my_file.txt", true, None, "https://example.com/zerobounce-done")?;
+zb.domain_search_sftp_file("my_file.txt", true, None, "https://example.com/zerobounce-done")?;
 
 // Note the field: this one takes export_path, not export_bucket.
 // None uses the export path from your settings.
 zb.export_sftp_file("<FILE_ID>", Some("/exports"))?;
 ```
+
+## Bulk email finder and domain search files
+
+Run the email finder or domain search over a whole file. These four-step flows
+(submit, status, download, delete) live on the bulk host *without* the `/v2`
+path the other bulk APIs use. See the
+[bulk email finder](https://www.zerobounce.net/docs/email-finder-api/) and
+[domain search](https://www.zerobounce.net/docs/domain-search-api/) docs.
+
+```rust
+use zero_bounce::{ZBBulkResponse, ZBEmailFinderFileOptions, ZeroBounce};
+
+let zb = ZeroBounce::new("<YOUR_API_KEY>");
+
+// Email finder. domain_column is required; so is one of first_name_column or
+// full_name_column — the API cannot guess a person from a domain alone.
+let submitted = zb.send_email_finder_file(
+    1,                                      // domain_column
+    &ZBEmailFinderFileOptions {
+        first_name_column: Some(2),
+        last_name_column: Some(3),
+        has_header_row: Some(true),
+        ..Default::default()
+    },
+    "leads.csv",
+    std::fs::File::open("leads.csv")?,
+)?;
+let file_id = submitted.file_id.unwrap_or_default();
+
+zb.email_finder_file_status(&file_id)?;
+if let ZBBulkResponse::Content(bytes) = zb.email_finder_result_fetch(&file_id)? {
+    std::fs::write("results.csv", bytes)?;
+}
+zb.email_finder_result_delete(&file_id)?;
+
+// Domain search. has_header_row is omitted when None, so the account default applies.
+let submitted = zb.send_domain_search_file(
+    1,                 // domain_column
+    Some(true),        // has_header_row
+    "domains.csv",
+    std::fs::File::open("domains.csv")?,
+)?;
+let file_id = submitted.file_id.unwrap_or_default();
+
+zb.domain_search_file_status(&file_id)?;
+let results = zb.domain_search_result_fetch(&file_id)?;
+zb.domain_search_result_delete(&file_id)?;
+```
+
+`email_finder_result_fetch` and `domain_search_result_fetch` follow the same
+rules as `bulk_validation_result_fetch`: the file bytes come back as
+`ZBBulkResponse::Content`, while a JSON body — including an HTTP 200 carrying
+`{"success": false}` — is an `Err` with a short message.
 
 ## Per-API base URLs
 
@@ -168,11 +227,13 @@ zb.url_provider.inbox_placement_url =
 Find an email address using either a domain or company name. Uses the builder pattern for ergonomic API calls.
 
 **Requirements:**
-- `first_name` is mandatory
 - Exactly one of `domain` or `company_name` must be provided (XOR requirement)
+- `first_name` is optional. Without it the API answers with the domain's address
+  formats, the same as `domain_search_v2`. Setting it to an empty string is still
+  rejected.
 
 **Builder Methods:**
-- `.first_name(name: &str)` - Set the first name (mandatory)
+- `.first_name(name: &str)` - Set the first name (optional)
 - `.domain(domain: &str)` - Set the domain name
 - `.company_name(company: &str)` - Set the company name
 - `.middle_name(name: &str)` - Set the middle name (optional)

@@ -6,7 +6,7 @@ use serde_json::{from_str, Value};
 
 use serde::Deserialize;
 
-use crate::utility::structures::bulk::ZBFileFeedback;
+use crate::utility::structures::bulk::{ZBBulkResponse, ZBEmailFinderFileOptions, ZBFileFeedback};
 use crate::utility::{ZBError, ZBResult};
 use crate::ZeroBounce;
 
@@ -104,24 +104,69 @@ fn post_bulk_root_multipart(
     crate::utility::http_error::parse_json_body(&body)
 }
 
-fn bulk_root_file_status(client: &ZeroBounce, base: &str, file_id: &str) -> ZBResult<String> {
-    let url = format!(
-        "{}/{}/filestatus",
+/// `{bulk root}/{base}/{endpoint}` for the finder and domain search file APIs,
+/// which sit on the bulk host without the `/v2` path the other bulk APIs use.
+fn bulk_root_url_of(client: &ZeroBounce, base: &str, endpoint: &str) -> String {
+    format!(
+        "{}/{}/{}",
         bulk_api_root(&client.url_provider.bulk_url),
-        base
-    );
+        base,
+        endpoint
+    )
+}
+
+fn bulk_root_file_status(client: &ZeroBounce, base: &str, file_id: &str) -> ZBResult<String> {
+    let url = bulk_root_url_of(client, base, "filestatus");
     client.generic_get_request(url, HashMap::from([("file_id", file_id)]))
 }
 
+fn bulk_root_result_fetch(
+    client: &ZeroBounce,
+    base: &str,
+    file_id: &str,
+) -> ZBResult<ZBBulkResponse> {
+    if file_id.trim().is_empty() {
+        return Err(ZBError::explicit("empty parameter: file_id"));
+    }
+    client.result_fetch_at(
+        bulk_root_url_of(client, base, "getfile"),
+        file_id,
+        None,
+        true,
+    )
+}
+
+fn bulk_root_result_delete(
+    client: &ZeroBounce,
+    base: &str,
+    file_id: &str,
+) -> ZBResult<ZBFileFeedback> {
+    if file_id.trim().is_empty() {
+        return Err(ZBError::explicit("empty parameter: file_id"));
+    }
+    client.result_delete_at(bulk_root_url_of(client, base, "deletefile"), file_id)
+}
+
 impl ZeroBounce {
+    /// Submit a file to the bulk email finder (POST /email-finder/sendfile).
+    ///
+    /// `domain_column` is required and 1-based. Either `first_name_column` or
+    /// `full_name_column` must be set on `options`: the API has no way to guess a
+    /// person from a domain alone and rejects a file that carries neither.
     pub fn send_email_finder_file(
         &self,
         domain_column: u32,
+        options: &ZBEmailFinderFileOptions,
         file_name: &str,
         mut reader: impl Read,
     ) -> ZBResult<ZBFileFeedback> {
         if domain_column == 0 {
             return Err(ZBError::explicit("empty parameter: domain_column"));
+        }
+        if options.first_name_column.is_none() && options.full_name_column.is_none() {
+            return Err(ZBError::explicit(
+                "one of first_name_column or full_name_column is required",
+            ));
         }
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
@@ -129,21 +174,56 @@ impl ZeroBounce {
             "{}/email-finder/sendfile",
             bulk_api_root(&self.url_provider.bulk_url)
         );
-        post_bulk_root_multipart(
-            self,
-            url,
-            file_name,
-            bytes,
-            HashMap::from([("domain_column".to_string(), domain_column.to_string())]),
-        )
+        let mut fields = HashMap::from([("domain_column".to_string(), domain_column.to_string())]);
+        for (name, column) in [
+            ("first_name_column", options.first_name_column),
+            ("full_name_column", options.full_name_column),
+            ("middle_name_column", options.middle_name_column),
+            ("last_name_column", options.last_name_column),
+        ] {
+            if let Some(column) = column {
+                fields.insert(name.to_string(), column.to_string());
+            }
+        }
+        if let Some(has_header_row) = options.has_header_row {
+            fields.insert("has_header_row".to_string(), has_header_row.to_string());
+        }
+        post_bulk_root_multipart(self, url, file_name, bytes, fields)
     }
 
     pub fn email_finder_file_status(&self, file_id: &str) -> ZBResult<String> {
         bulk_root_file_status(self, "email-finder", file_id)
     }
 
+    /// Download a finished bulk email finder file (GET /email-finder/getfile).
+    ///
+    /// On success the bytes come back as [`ZBBulkResponse::Content`]. A JSON body,
+    /// including an HTTP 200 carrying `{"success": false}`, is an error, the same
+    /// as [`bulk_validation_result_fetch`](Self::bulk_validation_result_fetch).
+    pub fn email_finder_result_fetch(&self, file_id: &str) -> ZBResult<ZBBulkResponse> {
+        bulk_root_result_fetch(self, "email-finder", file_id)
+    }
+
+    /// Delete a bulk email finder file and its results (GET /email-finder/deletefile).
+    pub fn email_finder_result_delete(&self, file_id: &str) -> ZBResult<ZBFileFeedback> {
+        bulk_root_result_delete(self, "email-finder", file_id)
+    }
+
     pub fn domain_search_file_status(&self, file_id: &str) -> ZBResult<String> {
         bulk_root_file_status(self, "domain-search", file_id)
+    }
+
+    /// Download a finished bulk domain search file (GET /domain-search/getfile).
+    ///
+    /// Same success and error rules as
+    /// [`email_finder_result_fetch`](Self::email_finder_result_fetch).
+    pub fn domain_search_result_fetch(&self, file_id: &str) -> ZBResult<ZBBulkResponse> {
+        bulk_root_result_fetch(self, "domain-search", file_id)
+    }
+
+    /// Delete a bulk domain search file and its results (GET /domain-search/deletefile).
+    pub fn domain_search_result_delete(&self, file_id: &str) -> ZBResult<ZBFileFeedback> {
+        bulk_root_result_delete(self, "domain-search", file_id)
     }
 
     /// Submit a finished evaluation for validation. `POST /v2/send-evaluated-file/`
@@ -175,9 +255,13 @@ impl ZeroBounce {
         crate::utility::http_error::parse_json_body(&body)
     }
 
+    /// Submit a file to bulk domain search (POST /domain-search/sendfile).
+    ///
+    /// `has_header_row` is omitted when `None`, so the account default applies.
     pub fn send_domain_search_file(
         &self,
         domain_column: u32,
+        has_header_row: Option<bool>,
         file_name: &str,
         mut reader: impl Read,
     ) -> ZBResult<ZBFileFeedback> {
@@ -190,13 +274,11 @@ impl ZeroBounce {
             "{}/domain-search/sendfile",
             bulk_api_root(&self.url_provider.bulk_url)
         );
-        post_bulk_root_multipart(
-            self,
-            url,
-            file_name,
-            bytes,
-            HashMap::from([("domain_column".to_string(), domain_column.to_string())]),
-        )
+        let mut fields = HashMap::from([("domain_column".to_string(), domain_column.to_string())]);
+        if let Some(has_header_row) = has_header_row {
+            fields.insert("has_header_row".to_string(), has_header_row.to_string());
+        }
+        post_bulk_root_multipart(self, url, file_name, bytes, fields)
     }
 
     pub fn send_list_evaluator_file(
@@ -210,10 +292,7 @@ impl ZeroBounce {
         }
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
-        let url = format!(
-            "{}/",
-            self.url_provider.list_evaluator_url
-        );
+        let url = format!("{}/", self.url_provider.list_evaluator_url);
         post_bulk_root_multipart(
             self,
             url,
@@ -288,43 +367,64 @@ impl ZeroBounce {
         Ok(from_str(&body)?)
     }
 
-    pub fn validate_s3_file(&self, file_name: &str) -> ZBResult<ZBFileFeedback> {
-        if file_name.trim().is_empty() {
-            return Err(ZBError::explicit("empty parameter: file_name"));
-        }
-        post_bulk_root_form(
+    /// Validate a file in your Amazon S3 bucket (POST /validateS3file).
+    ///
+    /// `file_name` is the full path as returned by [`list_s3_files`](Self::list_s3_files).
+    pub fn validate_s3_file(
+        &self,
+        file_name: &str,
+        has_header_row: bool,
+        remove_duplicates: Option<bool>,
+        return_url: &str,
+    ) -> ZBResult<ZBFileFeedback> {
+        bulk_root_file_job(
             self,
             "validateS3file",
-            HashMap::from([("file_name".to_string(), file_name.to_string())]),
+            file_name,
+            has_header_row,
+            remove_duplicates,
+            return_url,
         )
     }
 
-    pub fn score_s3_file(&self, file_name: &str) -> ZBResult<ZBFileFeedback> {
-        if file_name.trim().is_empty() {
-            return Err(ZBError::explicit("empty parameter: file_name"));
-        }
-        post_bulk_root_form(
+    /// AI score a file in your Amazon S3 bucket (POST /scoreS3file).
+    pub fn score_s3_file(
+        &self,
+        file_name: &str,
+        has_header_row: bool,
+        remove_duplicates: Option<bool>,
+        return_url: &str,
+    ) -> ZBResult<ZBFileFeedback> {
+        bulk_root_file_job(
             self,
             "scoreS3file",
-            HashMap::from([("file_name".to_string(), file_name.to_string())]),
+            file_name,
+            has_header_row,
+            remove_duplicates,
+            return_url,
         )
     }
 
-    pub fn export_s3_file(&self, file_id: &str, export_bucket: &str) -> ZBResult<ZBFileFeedback> {
+    /// Export a validated or scored file back to Amazon S3 (POST /exportS3file).
+    ///
+    /// Pass `None` to use the export bucket from your ZeroBounce settings. Note the
+    /// field name: [`export_sftp_file`](Self::export_sftp_file) takes `export_path`.
+    pub fn export_s3_file(
+        &self,
+        file_id: &str,
+        export_bucket: Option<&str>,
+    ) -> ZBResult<ZBFileFeedback> {
         if file_id.trim().is_empty() {
             return Err(ZBError::explicit("empty parameter: file_id"));
         }
-        if export_bucket.trim().is_empty() {
-            return Err(ZBError::explicit("empty parameter: export_bucket"));
+        let mut fields = HashMap::from([("file_id".to_string(), file_id.to_string())]);
+        if let Some(export_bucket) = export_bucket {
+            if export_bucket.trim().is_empty() {
+                return Err(ZBError::explicit("empty parameter: export_bucket"));
+            }
+            fields.insert("export_bucket".to_string(), export_bucket.to_string());
         }
-        post_bulk_root_form(
-            self,
-            "exportS3file",
-            HashMap::from([
-                ("file_id".to_string(), file_id.to_string()),
-                ("export_bucket".to_string(), export_bucket.to_string()),
-            ]),
-        )
+        post_bulk_root_form(self, "exportS3file", fields)
     }
 
     /// Run the email finder on a file in your Amazon S3 bucket (POST /emailFinderS3file).

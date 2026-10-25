@@ -7,7 +7,8 @@ use std::time::Duration;
 
 pub use crate::api::{DomainSearchV2Builder, FindEmailV2Builder};
 pub use crate::utility::structures::bulk::{
-    zb_download_type, ZBBulkResponse, ZBFile, ZBFileFeedback, ZBFileStatus, ZBGetFileOptions,
+    zb_download_type, ZBBulkResponse, ZBEmailFinderFileOptions, ZBFile, ZBFileFeedback,
+    ZBFileStatus, ZBGetFileOptions,
 };
 pub use crate::utility::structures::validate_enums::{ZBValidateStatus, ZBValidateSubStatus};
 pub use crate::utility::structures::{ActivityData, ApiUsage};
