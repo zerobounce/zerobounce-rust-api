@@ -137,12 +137,12 @@ impl ZeroBounce {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_string();
-        let response_content = response.text()?;
-        if response_content.len() > utility::MAX_JSON_RESPONSE_BYTES {
-            return Err(ZBError::ExplicitError(
-                "response body exceeds size limit".into(),
-            ));
-        }
+        let body = utility::read_limited(
+            response,
+            utility::MAX_JSON_RESPONSE_BYTES,
+            "response body exceeds size limit",
+        )?;
+        let response_content = String::from_utf8_lossy(&body).into_owned();
         utility::http_error::ensure_json_api_body(status, &content_type, &response_content)?;
         Ok(response_content)
     }

@@ -86,12 +86,11 @@ impl ZeroBounce {
             .map_err(|e| ZBError::ExplicitError(e.to_string()))?
             .to_string();
 
-        let body_bytes = response.bytes()?;
-        if body_bytes.len() > crate::utility::MAX_GETFILE_BYTES {
-            return Err(ZBError::ExplicitError(
-                "getfile response exceeds size limit".into(),
-            ));
-        }
+        let body_bytes = crate::utility::read_limited(
+            response,
+            crate::utility::MAX_GETFILE_BYTES,
+            "getfile response exceeds size limit",
+        )?;
         let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
 
         if crate::utility::http_error::body_looks_like_html(&body_str)
@@ -126,7 +125,7 @@ impl ZeroBounce {
             return Err(ZBError::ExplicitError(message));
         }
 
-        Ok(ZBBulkResponse::Content(body_bytes))
+        Ok(ZBBulkResponse::Content(body_bytes.into()))
     }
 
     fn generic_result_fetch(

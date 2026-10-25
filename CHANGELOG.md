@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- JSON and bulk get-file responses now stop reading at their size limits, preventing oversized upstream bodies from exhausting memory before the limit check. Warmup responses use the same bounded reads.
 - Redirects are disabled, so a 3xx response cannot send the API key to another host.
 - Error values no longer include the raw HTML access-denied page.
 - A Warmup API key with surrounding whitespace or control characters is rejected, because the transport would otherwise quote it unredacted in its own error.

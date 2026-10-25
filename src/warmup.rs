@@ -152,9 +152,18 @@ impl ZeroBounceWarmup {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_string();
-        let text = response
-            .text()
-            .map_err(|error| ZBError::ExplicitError(self.redact(&error.to_string(), secrets)))?;
+        let max_bytes = if content_type.starts_with("text/csv") {
+            crate::utility::MAX_GETFILE_BYTES
+        } else {
+            crate::utility::MAX_JSON_RESPONSE_BYTES
+        };
+        let body = crate::utility::read_limited(
+            response,
+            max_bytes,
+            "response body exceeds size limit",
+        )
+        .map_err(|error| ZBError::ExplicitError(self.redact(&error.to_string(), secrets)))?;
+        let text = String::from_utf8_lossy(&body).into_owned();
 
         if (300..400).contains(&status) {
             return Err(ZBError::api(

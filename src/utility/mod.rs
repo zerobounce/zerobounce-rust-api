@@ -1,4 +1,5 @@
 use std::io::Error as IOError;
+use std::io::Read;
 
 pub mod bulk_get_file;
 pub mod http_error;
@@ -13,6 +14,59 @@ pub const CONTENT_TYPE_STREAM: &str = "application/octet-stream";
 pub const MAX_JSON_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 /// Cap bulk getfile downloads (still large enough for typical CSV exports).
 pub const MAX_GETFILE_BYTES: usize = 256 * 1024 * 1024;
+
+/// Stop reading after one byte past the cap, so an oversized response cannot
+/// consume unbounded memory before the caller checks its length.
+pub(crate) fn read_limited(
+    mut reader: impl Read,
+    max_bytes: usize,
+    message: &str,
+) -> ZBResult<Vec<u8>> {
+    let mut body = Vec::new();
+    reader.by_ref().take(max_bytes as u64 + 1).read_to_end(&mut body)?;
+    if body.len() > max_bytes {
+        return Err(ZBError::explicit(message));
+    }
+    Ok(body)
+}
+
+#[cfg(test)]
+mod response_limit_tests {
+    use super::read_limited;
+    use std::io::{self, Read};
+
+    struct CountingReader {
+        remaining: usize,
+        read: usize,
+    }
+
+    impl Read for CountingReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = buf.len().min(self.remaining);
+            buf[..n].fill(b'x');
+            self.remaining -= n;
+            self.read += n;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn stops_at_one_byte_past_limit() {
+        let mut source = CountingReader {
+            remaining: 10_000,
+            read: 0,
+        };
+        let error = read_limited(&mut source, 32, "too large").unwrap_err();
+        assert_eq!(error.to_string(), "too large");
+        assert_eq!(source.read, 33);
+    }
+
+    #[test]
+    fn accepts_body_at_limit() {
+        let body = read_limited(&b"exact"[..], 5, "too large").unwrap();
+        assert_eq!(body, b"exact");
+    }
+}
 
 /// Enum representing the available API base URLs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
