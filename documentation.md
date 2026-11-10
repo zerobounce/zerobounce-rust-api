@@ -1,3 +1,15 @@
+#### Installation
+
+Add the crate to `Cargo.toml`:
+
+```toml
+[dependencies]
+zero-bounce = "3.0.0"
+```
+
+Requires Rust 1.88 or newer (`rust-version = "1.88"`). Upgrading from 2.x? See the
+breaking changes in the [3.0.0 changelog](https://github.com/zerobounce/zerobounce-rust-api/blob/main/CHANGELOG.md#300---2026-11-11).
+
 #### How to use
 This crate uses the ZeroBounce API which requires an API key. Check [this guide](https://www.zerobounce.net/docs/api-dashboard#API_keys_management) to see how to grab yours.
 
@@ -25,13 +37,13 @@ You can specify a region using the `ApiBaseUrl` enum:
 use zero_bounce::{ZeroBounce, ApiBaseUrl};
 
 // USA region
-let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::USA);
+let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::USA)?;
 
 // EU region
-let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::EU);
+let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::EU)?;
 
 // Default (explicit)
-let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::Default);
+let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::Default)?;
 ```
 
 ### Using Custom URL String
@@ -41,8 +53,11 @@ You can also provide a custom base URL as a string:
 ```rust
 use zero_bounce::ZeroBounce;
 
-let zb = ZeroBounce::with_base_url("your_api_key", "https://custom-api.example.com/v2/");
+let zb = ZeroBounce::with_base_url("your_api_key", "https://custom-api.example.com/v2/")?;
 ```
+
+`with_base_url` returns a `ZBResult`: a URL that is not `https://` is an error
+(`http://` only for `127.0.0.1`, `localhost` and `[::1]`).
 
 **Available API Base URLs:**
 - `ApiBaseUrl::Default` - `https://api.zerobounce.net/v2/` (default)
@@ -124,6 +139,8 @@ SFTP/FTP server. See the [S3](https://www.zerobounce.net/docs/api-integrations/a
 and [SFTP](https://www.zerobounce.net/docs/api-integrations/sftp_bulk_api) docs.
 
 ```rust
+use zero_bounce::ZeroBounce;
+
 let zb = ZeroBounce::new("<YOUR_API_KEY>");
 
 // Amazon S3. file_name is the full path, as returned by list_s3_files.
@@ -210,9 +227,12 @@ rules as `bulk_validation_result_fetch`: the file bytes come back as
 ## Per-API base URLs
 
 The list evaluator and the Inbox Placement Tester have their own base URLs,
-separate from the main and bulk hosts.
+separate from the main and bulk hosts. Overrides follow the same rule as every
+other base URL: `https://`, or `http://` only for `127.0.0.1`, `localhost` and `[::1]`.
 
 ```rust
+use zero_bounce::ZeroBounce;
+
 let mut zb = ZeroBounce::new("<YOUR_API_KEY>");
 zb.url_provider.list_evaluator_url =
     "https://bulkapi.zerobounce.net/v2/listevaluator".to_string();
@@ -285,6 +305,10 @@ This method is kept for backward compatibility but will be removed in a future v
 
 **Example:**
 ```rust
+use zero_bounce::ZeroBounce;
+
+let zb = ZeroBounce::new("your_api_key");
+#[allow(deprecated)]
 let result = zb.find_email("example.com", "John", "", "Doe")?;
 ```
 
@@ -336,6 +360,10 @@ This method is kept for backward compatibility but will be removed in a future v
 
 **Example:**
 ```rust
+use zero_bounce::ZeroBounce;
+
+let zb = ZeroBounce::new("your_api_key");
+#[allow(deprecated)]
 let result = zb.domain_search("example.com")?;
 ```
 
@@ -383,7 +411,6 @@ println!("Total API calls: {}", usage.total);
 - `status_catch_all`: Number of catch-all email addresses
 - `status_do_not_mail`: Number of do-not-mail addresses
 - `status_spamtrap`: Number of spamtrap addresses
-- `status_abuse`: Number of abuse addresses
 - `status_unknown`: Number of unknown addresses
 - `sub_status_antispam_system`: Number of antispam system responses
 - `sub_status_greylisted`: Number of greylisted responses
@@ -409,6 +436,11 @@ println!("Total API calls: {}", usage.total);
 - `sub_status_accept_all`: Number of accept-all addresses
 - `sub_status_disposable`: Number of disposable addresses
 - `sub_status_toxic`: Number of toxic addresses
+- `sub_status_mx_forward`, `sub_status_alternate`, `sub_status_allowed`, `sub_status_blocked`, `sub_status_gold`, `sub_status_role_based_accept_all`: Counts for those sub-statuses
+- `start_date`, `end_date`: The period the counts cover
+
+The API returns only the counters that apply to your account and the period, so
+every counter is 0 when the API leaves it out.
 
 ### get_api_usage_overall
 
@@ -440,14 +472,13 @@ let zb = ZeroBounce::new("your_api_key");
 let activity = zb.get_activity_data("valid@example.com")?;
 println!("Found: {}", activity.found);
 if activity.found {
-    println!("Active status: {}", activity.active_status);
+    println!("Active in the last {:?} days", activity.active_in_days);
 }
 ```
 
 **Returns:** `ActivityData` containing:
 - `found`: Whether activity data was found for the email
-- `active_status`: Active status of the email address
-- `active_date`: Date when the email was last active
+- `active_in_days`: `Option<u128>`, the number of days within which the address was last seen active, as the API reports it; `None` when there is no activity data
 
 ## Email Validation Methods
 
@@ -471,12 +502,15 @@ println!("Sub status: {:?}", validation.sub_status);
 **Returns:** `ZBValidation` containing:
 - `address`: The email address that was validated
 - `status`: Validation status (`valid`, `invalid`, `catch-all`, `unknown`, `spamtrap`, `abuse`, `do_not_mail`)
-- `sub_status`: Sub-status providing more details about the validation result
+- `sub_status`: Sub-status providing more details about the validation result (`validation.status_enum()` / `validation.sub_status_enum()` give the typed `ZBValidateStatus` / `ZBValidateSubStatus`)
+- `free_email`: Whether the address is on a free email provider
 - `account`: Account name (if available)
 - `domain`: Domain name
 - `did_you_mean`: Suggested alternative email address
 - `domain_age_days`: Age of the domain in days
+- `active_in_days`, `active_first_seen`: Activity data (if available)
 - `smtp_provider`: SMTP provider name
+- `catchall_domain`: Whether the domain is catch-all (if returned)
 - `mx_found`: Whether MX records were found
 - `mx_record`: MX record value
 - `firstname`: First name associated with the email (if available)
@@ -486,6 +520,8 @@ println!("Sub status: {:?}", validation.sub_status);
 - `region`: Region associated with the email (if available)
 - `city`: City associated with the email (if available)
 - `zipcode`: Zipcode associated with the email (if available)
+- `domain_website_exists`, `domain_registrant_company_name`: With the `domain_info` option
+- `message`: Set instead of a result while greylist processing is still running
 - `processed_at`: Timestamp when the validation was processed
 
 ### validate_email_and_ip
@@ -529,6 +565,7 @@ println!("Email batch: {:#?}", batch_result.email_batch);
 
 **Returns:** `ZBBatchValidation` containing:
 - `email_batch`: Vector of `ZBValidation` results for each email address
+- `errors`: Per-address errors (`error`, `email_address`). An account-level error (address `all`, such as an invalid key or no credits) is returned as `Err(ZBError::ApiError { .. })` instead
 
 ## Bulk Validation Methods
 
@@ -536,7 +573,7 @@ Bulk validation allows you to upload a file containing multiple email addresses 
 
 Bulk flows use the [v2 bulk API](https://www.zerobounce.net/docs/email-validation-api-quickstart/v2-send-file). For optional [v2 get file](https://www.zerobounce.net/docs/email-validation-api-quickstart/v2-get-file) query parameters, use `bulk_validation_result_fetch_with_options` / `ai_scoring_result_fetch_with_options` with `ZBGetFileOptions` (`download_type`, and `activity_data` for validation only). Use `zb_download_type::PHASE_1`, `PHASE_2`, or `COMBINED` for `download_type`. For validation sendfile only, use `.set_allow_phase_2(Some(true))` or `Some(false)` on `ZBFile`; AI scoring sendfile ignores this field.
 
-On success, result fetch returns `ZBBulkResponse::Content(bytes)`. Non-success HTTP statuses and JSON error bodies (including some HTTP 200 responses with `"success": false`) return `Err(ZBError::ExplicitError(_))`. Use `get_file_json_indicates_error` / `format_get_file_error_message` from the crate root on a raw body when needed. `ZBFileStatus` includes optional `file_phase_2_status` when the API returns it.
+On success, result fetch returns `ZBBulkResponse::Content(bytes)`. Non-success HTTP statuses and JSON error bodies (including some HTTP 200 responses with `"success": false`) return `Err(ZBError::ApiError { status, message })`; `ZBError::status_code()` gives the HTTP status. Use `get_file_json_indicates_error` / `format_get_file_error_message` from the crate root on a raw body when needed. `ZBFileStatus` includes optional `file_phase_2_status` when the API returns it.
 
 ### bulk_validation_file_submit
 
@@ -550,10 +587,8 @@ Submit a file for bulk email validation.
 use zero_bounce::{ZeroBounce, ZBFile};
 
 let zb = ZeroBounce::new("your_api_key");
-let file_content = vec![
-    "email1@example.com".to_string(),
-    "email2@example.com".to_string(),
-];
+// from_content takes the file's bytes (CSV, one address per line here).
+let file_content = b"email1@example.com\nemail2@example.com\n".to_vec();
 let zb_file = ZBFile::from_content(file_content)
     .set_has_header_row(false)
     .set_remove_duplicate(true);
@@ -564,6 +599,7 @@ println!("File ID: {:?}", submit_result.file_id);
 **Returns:** `ZBFileFeedback` containing:
 - `success`: Whether the file submission was successful
 - `message`: Status message
+- `file_name`: Optional name of the submitted file
 - `file_id`: Optional file ID to use for status checks and result fetching
 
 ### bulk_validation_file_status_check
@@ -580,20 +616,19 @@ use zero_bounce::ZeroBounce;
 let zb = ZeroBounce::new("your_api_key");
 let status = zb.bulk_validation_file_status_check("file_id_here")?;
 println!("Complete percentage: {}%", status.complete_percentage);
-println!("Success count: {}", status.success_count);
+println!("File status: {}", status.file_status);
 ```
 
 **Returns:** `ZBFileStatus` containing:
 - `success`: Whether the status check was successful
-- `message`: Status message
 - `file_id`: The file ID
 - `file_name`: Name of the file
 - `upload_date`: Date when the file was uploaded
 - `file_status`: Current status of the file
 - `complete_percentage`: Percentage of processing completed
-- `return_url`: URL to fetch results
-- `success_count`: Number of successfully processed emails
-- `error_count`: Number of errors encountered
+- `error_reason`: Why the file failed, when it did
+- `file_phase_2_status`: Phase 2 status, when the API returns it
+- `return_url`: The callback URL given at submission, if any
 
 ### bulk_validation_result_fetch
 
@@ -613,7 +648,7 @@ if let ZBBulkResponse::Content(bytes) = result {
 }
 ```
 
-**Returns:** `Ok(ZBBulkResponse::Content(bytes))` on successful file download; errors are `Err(ZBError::ExplicitError(_))`.
+**Returns:** `Ok(ZBBulkResponse::Content(bytes))` on successful file download; errors are `Err(ZBError::ApiError { .. })`, carrying the HTTP status.
 
 ### bulk_validation_result_fetch_with_options
 
@@ -655,10 +690,8 @@ Submit a file for AI scoring analysis.
 use zero_bounce::{ZeroBounce, ZBFile};
 
 let zb = ZeroBounce::new("your_api_key");
-let file_content = vec![
-    "email1@example.com".to_string(),
-    "email2@example.com".to_string(),
-];
+// from_content takes the file's bytes (CSV, one address per line here).
+let file_content = b"email1@example.com\nemail2@example.com\n".to_vec();
 let zb_file = ZBFile::from_content(file_content)
     .set_has_header_row(false)
     .set_remove_duplicate(true);

@@ -1,12 +1,17 @@
 //! Validation status and sub-status enums for API responses.
 //!
-//! Use for type-safe comparison. Unknown/future API values map to `Unknown(String)`.
+//! Use for type-safe comparison. Unknown/future API values map to `UnknownValue(String)`.
 
 use std::str::FromStr;
 
 /// Validation status values returned by the API (validate, validate_batch).
-/// Parse from string: `let s: ZBValidateStatus = response.status.parse().unwrap_or(ZBValidateStatus::Unknown(response.status.clone()));`
+/// Parse from string: `let s: ZBValidateStatus = response.status.parse().unwrap();` (parsing never fails;
+/// a value this version does not know becomes `UnknownValue`).
+///
+/// `#[non_exhaustive]`: a status added later is not a breaking change, so a
+/// `match` on it needs a `_` arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ZBValidateStatus {
     None,
     Valid,
@@ -39,7 +44,11 @@ impl FromStr for ZBValidateStatus {
 }
 
 /// Validation sub-status values returned by the API (validate, validate_batch).
+///
+/// `#[non_exhaustive]`: a sub-status added later is not a breaking change, so a
+/// `match` on it needs a `_` arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ZBValidateSubStatus {
     None,
     AntispamSystem,

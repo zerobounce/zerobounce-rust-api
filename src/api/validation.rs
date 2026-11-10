@@ -209,6 +209,7 @@ impl ZeroBounce {
             .header("content-type", CONTENT_TYPE_JSON)
             .send()?;
 
+        let status = response.status().as_u16();
         let response_content = self.read_api_response(response)?;
         let validation: ZBBatchValidation =
             crate::utility::http_error::parse_json_body(&response_content)?;
@@ -220,7 +221,9 @@ impl ZeroBounce {
                 } else {
                     message
                 };
-                return Err(ZBError::ExplicitError(message));
+                // The account-level failure arrives on an HTTP 200; carry it so
+                // status_code() is Some, like every other failed response.
+                return Err(ZBError::api(status, message));
             }
         }
         Ok(validation)

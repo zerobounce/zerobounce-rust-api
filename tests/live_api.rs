@@ -146,11 +146,15 @@ fn validation_free() {
     let before = zb.get_credits().unwrap_or(-2);
 
     check(
-        "get_credits returns a balance",
-        if before >= -1 {
+        "get_credits returns a positive balance",
+        // The API answers an invalid key with a balance of -1, so anything
+        // that is not positive proves nothing about the rest of this suite.
+        if before > 0 {
             Ok(())
+        } else if before == -1 {
+            Err("balance is -1: the API key is invalid".into())
         } else {
-            Err("could not read the credit balance".into())
+            Err(format!("could not read a usable credit balance (got {before})"))
         },
     );
 

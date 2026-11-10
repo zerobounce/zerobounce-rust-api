@@ -26,7 +26,7 @@ fn main() -> ZBResult<()> {
     
     // Example 2: Using enum - USA region
     println!("=== Example 2: Using enum - USA region ===");
-    let zb_usa = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::USA);
+    let zb_usa = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::USA)?;
     println!("Base URL: {}", zb_usa.base_url);
     
     let find_email_response = zb_usa.find_email_v2()
@@ -39,7 +39,7 @@ fn main() -> ZBResult<()> {
     
     // Example 3: Using enum - EU region
     println!("=== Example 3: Using enum - EU region ===");
-    let zb_eu = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::EU);
+    let zb_eu = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::EU)?;
     println!("Base URL: {}", zb_eu.base_url);
     
     let find_email_response = zb_eu.find_email_v2()
@@ -53,7 +53,7 @@ fn main() -> ZBResult<()> {
     // Example 4: Using direct string
     println!("=== Example 4: Using direct string ===");
     let custom_url = "https://api.zerobounce.net/v2/";
-    let zb_custom = ZeroBounce::with_base_url(&api_key, custom_url);
+    let zb_custom = ZeroBounce::with_base_url(&api_key, custom_url)?;
     println!("Base URL: {}", zb_custom.base_url);
     
     let find_email_response = zb_custom.find_email_v2()
@@ -66,7 +66,7 @@ fn main() -> ZBResult<()> {
     
     // Example 5: Using enum - Default (explicit)
     println!("=== Example 5: Using enum - Default (explicit) ===");
-    let zb_default_explicit = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::Default);
+    let zb_default_explicit = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::Default)?;
     println!("Base URL: {}", zb_default_explicit.base_url);
     
     let find_email_response = zb_default_explicit.find_email_v2()

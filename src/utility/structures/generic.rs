@@ -11,6 +11,10 @@ use crate::utility::structures::custom_deserialize::deserialize_stringified_uint
 /// Deserializing them as required fields failed the whole call, so every
 /// counter defaults to 0 and a counter added later is ignored rather than
 /// fatal.
+///
+/// `#[non_exhaustive]`: a counter added to this struct later is not a breaking
+/// change. Values come from the API (or from `serde_json` in tests).
+#[non_exhaustive]
 pub struct ApiUsage {
     #[serde(default)]
     pub total: u64,

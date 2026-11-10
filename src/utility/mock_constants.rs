@@ -58,6 +58,14 @@ pub const INVALID_API_RESPONSE: &str = r#"
 }
 "#;
 
+/// LIVE: what every v2 endpoint answers for an invalid or drained key -- an
+/// HTTP 200 whose body is only an "error" field, with no "success" to gate on.
+pub const INVALID_API_KEY_200: &str = r#"
+{
+    "error": "Invalid API key or your account ran out of credits"
+}
+"#;
+
 pub const ACTIVITY_DATA_RESPONSE_ACTIVE: &str = r#"
 {
     "found": true,

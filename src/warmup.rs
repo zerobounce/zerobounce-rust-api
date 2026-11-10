@@ -20,8 +20,10 @@ const BASE_PATH: &str = "/api/v1/warmup";
 /// Required by the schema but always replaced with the key's own team.
 const ANY_TEAM_ID: i64 = 1;
 
-/// How a sending account is run.
+/// How a sending account is run. `#[non_exhaustive]`, so a model added later
+/// is not a breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum OnboardingModel {
     /// You run the mailbox yourself.
     SelfManaged,

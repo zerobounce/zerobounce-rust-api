@@ -55,6 +55,29 @@ fn test_simple_validation_bad_request() {
     };
 }
 
+/// LIVE: the same HTTP 200 + {"error": ...} body on the validate endpoint.
+#[test]
+fn test_simple_validation_invalid_key_200() {
+    let (mut mock_server, zb_instance) = instantiate();
+
+    let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_VALIDATE))
+        .with_status(200)
+        .with_header("content-type", CONTENT_TYPE_JSON)
+        .with_body(mock_constants::INVALID_API_KEY_200)
+        .create();
+
+    let validation = zb_instance.validate_email(EMAIL);
+    assert!(validation.is_err());
+    mock.assert();
+
+    let zb_error = validation.unwrap_err();
+    let ZBError::ApiError { message, .. } = &zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
+    };
+    assert_eq!(message, "Invalid API key or your account ran out of credits");
+    assert!(!message.contains("not valid JSON"), "{message}");
+}
+
 #[test]
 fn test_simple_validation_ok() {
     let (mut mock_server, zb_instance) = instantiate();

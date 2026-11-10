@@ -5,10 +5,21 @@ use crate::utility::structures::custom_deserialize::deserialize_naive_date;
 use crate::utility::structures::validate_enums::{ZBValidateStatus, ZBValidateSubStatus};
 
 
+/// One validation result.
+///
+/// `#[non_exhaustive]`: the API adds response fields over time, and a field
+/// added later is not a breaking change. Values come from the API (or from
+/// `serde_json` in tests); there is no struct literal outside this crate.
 #[derive(Clone, Debug, Deserialize)]
+#[non_exhaustive]
 pub struct ZBValidation {
+    // These default rather than fail: a repeated greylist_processing request
+    // answers with nothing but "Message" (see `message`).
+    #[serde(default)]
     pub address: String,
+    #[serde(default)]
     pub status: String,
+    #[serde(default)]
     pub sub_status: String,
     #[serde(default)]
     pub free_email: bool,

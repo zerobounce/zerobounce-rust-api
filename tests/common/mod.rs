@@ -11,12 +11,12 @@ pub(crate) fn instantiate<'s>() -> (ServerGuard, ZeroBounce) {
     let mock_server = Server::new();
     let mock_url: String = mock_server.url().to_owned();
 
-    let mock_url_provider = ZBUrlProvider {
-        url: mock_url.clone(),
-        bulk_url: mock_url.clone(),
-        list_evaluator_url: mock_url.clone(),
-        inbox_placement_url: mock_url.clone(),
-    };
+    // ZBUrlProvider is #[non_exhaustive]: start from the default and override.
+    let mut mock_url_provider = ZBUrlProvider::default();
+    mock_url_provider.url = mock_url.clone();
+    mock_url_provider.bulk_url = mock_url.clone();
+    mock_url_provider.list_evaluator_url = mock_url.clone();
+    mock_url_provider.inbox_placement_url = mock_url.clone();
     let zb_instance = ZeroBounce {
         api_key: MOCK_API_KEY.to_string().clone(),
         base_url: mock_url.clone(),
@@ -31,16 +31,16 @@ pub(crate) fn endpoint_matcher(endpoint: &str) -> Matcher {
 }
 
 pub(crate) fn invalid_url_zb_instance() -> ZeroBounce {
+    let mut url_provider = ZBUrlProvider::default();
+    url_provider.url = INVALID_URL.to_owned();
+    url_provider.bulk_url = INVALID_URL.to_owned();
+    url_provider.list_evaluator_url = INVALID_URL.to_owned();
+    url_provider.inbox_placement_url = INVALID_URL.to_owned();
     ZeroBounce {
         api_key: MOCK_API_KEY.to_string().clone(),
         base_url: INVALID_URL.to_owned(),
         client: reqwest::blocking::Client::default(),
-        url_provider: ZBUrlProvider {
-            url: INVALID_URL.to_owned(),
-            bulk_url: INVALID_URL.to_owned(),
-            list_evaluator_url: INVALID_URL.to_owned(),
-            inbox_placement_url: INVALID_URL.to_owned(),
-        },
+        url_provider,
     }
 }
 

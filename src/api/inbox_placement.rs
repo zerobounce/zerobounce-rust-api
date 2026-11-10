@@ -1,6 +1,6 @@
 //! Inbox Placement Tester (bulkapi.zerobounce.net/api/ipt).
 //!
-//! The API key goes on the query string rather than in the body, and bodies are
+//! The API key goes in an `Authorization: Bearer` header, and bodies are
 //! JSON with camelCase fields. Only fields the caller set are sent. Uses the
 //! account's inbox-test credits.
 
@@ -240,9 +240,10 @@ impl ZeroBounce {
     ) -> ZBResult<Value> {
         self.require_key()?;
 
-        let url = self.url_provider.inbox_placement_url_of(path);
-        let parsed = reqwest::Url::parse(&url)
-            .map_err(|_| ZBError::explicit("Invalid parameter: inbox placement base URL"))?;
+        // The same https rule as every other request: an http:// override would
+        // otherwise send the Bearer key in cleartext.
+        let parsed =
+            crate::parse_request_url(&self.url_provider.inbox_placement_url_of(path))?;
 
         let mut request = match method {
             "POST" => self.client.post(parsed),

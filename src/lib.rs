@@ -16,8 +16,19 @@ pub use crate::utility::{format_get_file_error_message, get_file_json_indicates_
 pub use crate::utility::{ApiBaseUrl, ZBError, ZBResult};
 pub use crate::warmup::{EmailContent, ManagedSending, OnboardingModel, ZeroBounceWarmup};
 
-// Structure meant to generate the URLs to be accessed with the HTTP requests
-// based on the base API URLs (for the base API and bulk API).
+/// The base URLs requests are built from.
+///
+/// Start from [`ZBUrlProvider::default()`] (the live hosts) and assign the fields
+/// you want to change. The struct is `#[non_exhaustive]`, so it cannot be built
+/// with a struct literal outside this crate and a base URL added later is not a
+/// breaking change.
+///
+/// Every request checks its final URL: it must be `https://`, or `http://` with
+/// the exact host `127.0.0.1`, `localhost` or `[::1]` (for local tests). Any
+/// other URL fails with an error before a connection is opened, so the API key
+/// is never sent in cleartext.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct ZBUrlProvider {
     pub url: String,
     pub bulk_url: String,
@@ -76,7 +87,7 @@ impl ZeroBounce {
     /// let zb = ZeroBounce::new("your_api_key");
     /// ```
     pub fn new(api_key: &str) -> ZeroBounce {
-        Self::with_base_url(api_key, ApiBaseUrl::Default)
+        Self::build(api_key, ApiBaseUrl::Default.as_str().to_string())
     }
 
     /// Create a new ZeroBounce client instance with a custom base URL.
@@ -89,22 +100,37 @@ impl ZeroBounce {
     ///   - `ApiBaseUrl::EU` - Uses the EU API URL
     ///   - `String` or `&str` - Uses a custom URL string
     ///
+    /// # Errors
+    /// Returns [`ZBError::ExplicitError`] when `base_url` is not an `https://`
+    /// URL. `http://` is accepted only for the exact hosts `127.0.0.1`,
+    /// `localhost` and `[::1]`, for local tests.
+    ///
     /// # Example
     /// ```no_run
     /// use zero_bounce::{ZeroBounce, ApiBaseUrl};
     ///
+    /// # fn main() -> Result<(), zero_bounce::ZBError> {
     /// // Using enum
-    /// let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::USA);
+    /// let zb = ZeroBounce::with_base_url("your_api_key", ApiBaseUrl::USA)?;
     ///
     /// // Using custom string
-    /// let zb = ZeroBounce::with_base_url("your_api_key", "https://custom-api.example.com/v2/");
+    /// let zb = ZeroBounce::with_base_url("your_api_key", "https://custom-api.example.com/v2/")?;
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn with_base_url<T>(api_key: &str, base_url: T) -> ZeroBounce
+    pub fn with_base_url<T>(api_key: &str, base_url: T) -> ZBResult<ZeroBounce>
     where
         T: Into<String>,
     {
-        let base_url_string = require_https_url(base_url.into());
+        let base_url_string = base_url.into();
+        parse_request_url(&base_url_string)
+            .map_err(|_| ZBError::explicit("base_url must be an https:// URL"))?;
+        Ok(Self::build(api_key, base_url_string))
+    }
 
+    /// The client both constructors share. Only [`with_base_url`](Self::with_base_url)
+    /// takes a caller's URL, and it checks it first.
+    fn build(api_key: &str, base_url_string: String) -> ZeroBounce {
         let url_provider = ZBUrlProvider {
             url: base_url_string.clone(),
             ..ZBUrlProvider::default()
@@ -130,6 +156,14 @@ impl ZeroBounce {
     }
 
     fn read_api_response(&self, response: reqwest::blocking::Response) -> ZBResult<String> {
+        self.read_api_response_checked(response, false)
+    }
+
+    fn read_api_response_checked(
+        &self,
+        response: reqwest::blocking::Response,
+        message_only_is_failure: bool,
+    ) -> ZBResult<String> {
         let status = response.status().as_u16();
         let content_type = response
             .headers()
@@ -144,13 +178,35 @@ impl ZeroBounce {
         )?;
         let response_content = String::from_utf8_lossy(&body).into_owned();
         utility::http_error::ensure_json_api_body(status, &content_type, &response_content)?;
+        if message_only_is_failure {
+            utility::http_error::reject_message_only_body(status, &content_type, &response_content)?;
+        }
         Ok(response_content)
     }
 
     fn generic_get_request<'a>(
         &'a self,
         url: String,
+        query_args: HashMap<&'a str, &'a str>,
+    ) -> ZBResult<String> {
+        self.get_request_checked(url, query_args, false)
+    }
+
+    /// `generic_get_request` for a call whose result is never a bare message
+    /// (the email finder and domain search), so a message-only body is an error.
+    fn finder_get_request<'a>(
+        &'a self,
+        url: String,
+        query_args: HashMap<&'a str, &'a str>,
+    ) -> ZBResult<String> {
+        self.get_request_checked(url, query_args, true)
+    }
+
+    fn get_request_checked<'a>(
+        &'a self,
+        url: String,
         mut query_args: HashMap<&'a str, &'a str>,
+        message_only_is_failure: bool,
     ) -> ZBResult<String> {
         self.require_key()?;
         query_args.insert("api_key", self.api_key.as_str());
@@ -160,7 +216,7 @@ impl ZeroBounce {
             .get(parse_request_url(&url)?)
             .query(&query_args)
             .send()?;
-        self.read_api_response(response)
+        self.read_api_response_checked(response, message_only_is_failure)
     }
 
     fn generic_form_post_request<'a>(
@@ -180,6 +236,11 @@ impl ZeroBounce {
     }
 }
 
+/// Parse a request URL and enforce the transport rule every request follows:
+/// `https://`, or `http://` only for the exact loopback hosts `127.0.0.1`,
+/// `localhost` and `[::1]`. Every request path calls this on its final URL,
+/// so an `http://` override on [`ZBUrlProvider`] can never put the API key on
+/// the wire in cleartext.
 pub(crate) fn parse_request_url(url: &str) -> ZBResult<reqwest::Url> {
     let parsed = reqwest::Url::parse(url).map_err(|e| ZBError::ExplicitError(e.to_string()))?;
     if parsed.scheme() == "https" {
@@ -192,65 +253,68 @@ pub(crate) fn parse_request_url(url: &str) -> ZBResult<reqwest::Url> {
         }
     }
     Err(ZBError::ExplicitError(
-        "request URL must use https://".into(),
+        "request URL must use https:// (http:// is allowed only for 127.0.0.1, localhost and [::1])"
+            .into(),
     ))
-}
-
-fn require_https_url(url: String) -> String {
-    let lower = url.to_ascii_lowercase();
-    if lower.starts_with("https://") {
-        return url;
-    }
-    let is_loopback_http = reqwest::Url::parse(&url)
-        .map(|parsed| {
-            parsed.scheme() == "http"
-                && matches!(
-                    parsed.host_str(),
-                    Some("127.0.0.1") | Some("localhost") | Some("[::1]")
-                )
-        })
-        .unwrap_or(false);
-    if is_loopback_http {
-        return url;
-    }
-    panic!("base_url must be an https:// URL");
 }
 
 #[cfg(test)]
 mod security_tests {
-    use super::require_https_url;
+    use super::{parse_request_url, ZeroBounce};
 
     #[test]
     fn accepts_https() {
-        assert_eq!(
-            require_https_url("https://api.zerobounce.net/v2/".to_string()),
-            "https://api.zerobounce.net/v2/"
-        );
+        let zb = ZeroBounce::with_base_url("key", "https://api.zerobounce.net/v2/").unwrap();
+        assert_eq!(zb.base_url, "https://api.zerobounce.net/v2/");
+        assert_eq!(zb.url_provider.url, "https://api.zerobounce.net/v2/");
     }
 
     #[test]
     fn accepts_loopback_http() {
-        assert_eq!(
-            require_https_url("http://127.0.0.1:1234/".to_string()),
-            "http://127.0.0.1:1234/"
-        );
+        for url in [
+            "http://127.0.0.1:1234/",
+            "http://localhost:1234/",
+            "http://[::1]:1234/",
+        ] {
+            let zb = ZeroBounce::with_base_url("key", url).unwrap();
+            assert_eq!(zb.base_url, url);
+        }
+    }
+
+    fn rejected(url: &str) -> String {
+        match ZeroBounce::with_base_url("key", url) {
+            Ok(_) => panic!("{url} was accepted"),
+            Err(error) => error.to_string(),
+        }
     }
 
     #[test]
-    #[should_panic(expected = "https://")]
     fn rejects_remote_http() {
-        require_https_url("http://evil.example/v2/".to_string());
+        assert!(rejected("http://evil.example/v2/").contains("https://"));
     }
 
     #[test]
-    #[should_panic(expected = "https://")]
     fn rejects_loopback_lookalike_host() {
-        require_https_url("http://localhost.evil.example/v2/".to_string());
+        assert!(rejected("http://localhost.evil.example/v2/").contains("https://"));
     }
 
     #[test]
-    #[should_panic(expected = "https://")]
     fn rejects_loopback_userinfo_trick() {
-        require_https_url("http://127.0.0.1@evil.example/v2/".to_string());
+        assert!(rejected("http://127.0.0.1@evil.example/v2/").contains("https://"));
+    }
+
+    #[test]
+    fn rejects_other_loopback_spellings_and_garbage() {
+        for url in ["http://127.0.0.2/v2/", "http://0.0.0.0/v2/", "ftp://127.0.0.1/", "not a url"] {
+            assert!(rejected(url).contains("https://"), "{url}");
+        }
+    }
+
+    #[test]
+    fn request_urls_follow_the_same_rule() {
+        assert!(parse_request_url("https://bulkapi.zerobounce.net/v2/sendfile").is_ok());
+        assert!(parse_request_url("http://localhost:8080/v2/getfile").is_ok());
+        let error = parse_request_url("http://bulkapi.zerobounce.net/v2/sendfile").unwrap_err();
+        assert!(error.to_string().contains("https://"), "{error}");
     }
 }

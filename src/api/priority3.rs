@@ -99,7 +99,11 @@ fn post_bulk_root_multipart(
     for (key, value) in fields {
         form = form.text(key, value);
     }
-    let response = client.client.post(url).multipart(form).send()?;
+    let response = client
+        .client
+        .post(crate::parse_request_url(&url)?)
+        .multipart(form)
+        .send()?;
     let body = client.read_api_response(response)?;
     crate::utility::http_error::parse_json_body(&body)
 }

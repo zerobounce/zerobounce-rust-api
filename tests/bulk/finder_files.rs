@@ -216,8 +216,10 @@ fn test_email_finder_result_fetch_json_error_http_200() {
     let response = zb_instance.email_finder_result_fetch("mock_file_id");
     mock.assert();
 
-    let ZBError::ExplicitError(msg) = response.unwrap_err() else {
-        panic!("expected ExplicitError");
+    let zb_error = response.unwrap_err();
+    assert_eq!(zb_error.status_code(), Some(200));
+    let ZBError::ApiError { message: msg, .. } = zb_error else {
+        panic!("expected ApiError");
     };
     assert!(msg.contains("File deleted"), "{msg}");
 }
@@ -237,7 +239,7 @@ fn test_domain_search_result_fetch_bad_request() {
     mock.assert();
 
     let zb_error = response.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { status: 400, .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
     let message = zb_error.to_string();

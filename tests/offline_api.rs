@@ -14,7 +14,7 @@ use zero_bounce::api::inbox_placement::{
     CreateInboxPlacementTestOptions, InboxPlacementProviderSelection,
     ListInboxPlacementTestsOptions,
 };
-use zero_bounce::utility::BULK_URI;
+use zero_bounce::utility::{ZBError, BULK_URI};
 use zero_bounce::{ApiBaseUrl, ZeroBounce};
 
 struct Recorded {
@@ -175,6 +175,30 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
             "text/plain",
             "Error: Error: api_key is invalid".to_string(),
         );
+    }
+    // LIVE (2026-11-11): what an invalid or drained key gets back, each with an
+    // HTTP 200 and no "success" field.
+    if key.starts_with("dead-key-") {
+        let body = if path.contains("guessformat") {
+            r#"{"Message":"Invalid API key or your account ran out of credits"}"#
+        } else if path.contains("filters") {
+            r#"{  "Error": "Invalid API key or your account ran out of credits"}"#
+        } else if path.contains("getapiusage") {
+            r#"{"error":"Invalid API key"}"#
+        } else if path.contains("getcredits") {
+            r#"{"Credits":"-1"}"#
+        } else {
+            r#"{"error":"Invalid API key or your account ran out of credits"}"#
+        };
+        return (200, "application/json", body.to_string());
+    }
+    // The documented answer to a repeated greylist_processing validate: a
+    // result whose only field is Message, not an error.
+    if key.starts_with("greylist-pending-") && path.ends_with("/validate") {
+        return (200, "application/json", r#"{"Message":"Greylist validation still in progress. Please try again later."}"#.to_string());
+    }
+    if key.starts_with("filter-message-") && path.contains("filters") {
+        return (200, "application/json", r#"{"Message":"Filter has been added."}"#.to_string());
     }
     if path.contains("validatebatch") && key.starts_with("batch-account-") {
         return (200, "application/json", r#"{"email_batch":[],"errors":[{"error":"Invalid API Key or your account ran out of credits","email_address":"all"}]}"#.to_string());
@@ -448,7 +472,7 @@ fn version_constant_matches_package() {
         "https://api.zerobounce.net/v2/"
     );
     assert_eq!(BULK_URI, "https://bulkapi.zerobounce.net/v2");
-    assert_eq!(env!("CARGO_PKG_VERSION"), "2.1.3");
+    assert_eq!(env!("CARGO_PKG_VERSION"), "3.0.0");
 }
 
 #[test]
@@ -1588,4 +1612,319 @@ fn list_evaluator_uses_its_own_base_url_and_encodes_file_id() {
     zb.url_provider.list_evaluator_url = format!("http://127.0.0.1:{port}/custom/listevaluator");
     zb.get_list_evaluator_result("fid").unwrap();
     assert!(only(&fake).path.ends_with("/custom/listevaluator/fid/"));
+}
+
+fn api_error_message<T: std::fmt::Debug>(name: &str, result: Result<T, ZBError>) -> String {
+    match result {
+        Err(ZBError::ApiError { message, .. }) => message,
+        other => panic!("{name}: expected an ApiError, got {other:?}"),
+    }
+}
+
+/// An invalid or drained key answers with an HTTP 200 and an error-only body.
+/// Every call must fail with the API's own message instead of returning an
+/// empty result or a parse error.
+#[test]
+fn a_dead_key_is_an_api_error_on_every_call() {
+    let (port, _fake) = start_fake();
+    let zb = client(port, "dead-key-user");
+    let drained = "Invalid API key or your account ran out of credits";
+    assert_eq!(api_error_message("validate", zb.validate_email("a@example.com")), drained);
+    assert_eq!(api_error_message("activity", zb.get_activity_data("a@example.com")), drained);
+    assert_eq!(api_error_message("api usage", zb.get_api_usage_overall()), "Invalid API key");
+    assert_eq!(api_error_message("score", zb.score_email("a@example.com")), drained);
+    assert_eq!(api_error_message("find_email_v2", zb.find_email_v2().first_name("john").domain("example.com").call()), drained);
+    assert_eq!(api_error_message("domain_search_v2", zb.domain_search_v2().domain("example.com").call()), drained);
+    #[allow(deprecated)]
+    {
+        assert_eq!(api_error_message("find_email", zb.find_email("example.com", "john", "", "")), drained);
+        assert_eq!(api_error_message("domain_search", zb.domain_search("example.com")), drained);
+    }
+    assert_eq!(api_error_message("add_filter", zb.add_filter("allow", "email", "x@example.com")), drained);
+    assert_eq!(api_error_message("delete_filter", zb.delete_filter("allow", "email", "x@example.com")), drained);
+    assert_eq!(api_error_message("list_filters GET", zb.list_filters(false)), drained);
+    assert_eq!(api_error_message("list_filters POST", zb.list_filters(true)), drained);
+    // -1 is the documented balance of an invalid key, not an error.
+    assert_eq!(zb.get_credits().unwrap(), -1);
+}
+
+/// The error-body checks must not turn a real result into a failure.
+#[test]
+fn a_bare_message_is_still_a_result_where_the_api_means_one() {
+    let (port, _fake) = start_fake();
+    let zb = client(port, "greylist-pending-user");
+    let pending = zb.validate_email("a@example.com").expect("a pending greylist validate is a result");
+    assert_eq!(
+        pending.message.as_deref(),
+        Some("Greylist validation still in progress. Please try again later.")
+    );
+
+    let zb = client(port, "filter-message-user");
+    let added = zb.add_filter("allow", "email", "x@example.com").expect("a filter success is a result");
+    assert_eq!(added["Message"], "Filter has been added.");
+}
+
+// -- https on every request path -------------------------------------------
+//
+// `url_provider` is public, so a caller can point any base URL at plain
+// http://. Only the exact loopback hosts may use it; anything else must fail
+// before a connection is opened. The client below resolves a non-loopback
+// name to the local fake, so a request that slipped through would land there
+// with the API key in cleartext -- and the fake would record it.
+
+const PLAIN_HOST: &str = "plain-http.zb-test.invalid";
+
+fn plaintext_client(port: u16, key: &str) -> ZeroBounce {
+    let mut zb = client(port, key);
+    let root = format!("http://{PLAIN_HOST}:{port}");
+    zb.base_url = format!("{root}/api/v2");
+    zb.url_provider.url = format!("{root}/api/v2");
+    zb.url_provider.bulk_url = format!("{root}/bulk/v2");
+    zb.url_provider.list_evaluator_url = format!("{root}/bulk/v2/listevaluator");
+    zb.url_provider.inbox_placement_url = format!("{root}/api/ipt");
+    zb.client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve(
+            PLAIN_HOST,
+            std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        )
+        .build()
+        .unwrap();
+    zb
+}
+
+fn assert_refused_plaintext<T: std::fmt::Debug>(name: &str, result: Result<T, ZBError>) {
+    match result {
+        Err(ZBError::ExplicitError(message)) => {
+            assert!(message.contains("https://"), "{name}: {message}");
+        }
+        other => panic!("{name}: expected the https rule to refuse the request, got {other:?}"),
+    }
+}
+
+/// The fake must have seen nothing: no request, so no key on the wire.
+fn assert_nothing_sent(fake: &Fake, name: &str) {
+    let leaked = fake.take();
+    assert!(
+        leaked.is_empty(),
+        "{name}: {} request(s) reached the server over plain http, the first to {} carrying key {:?}",
+        leaked.len(),
+        leaked[0].path,
+        leaked[0].api_key
+    );
+}
+
+#[test]
+fn plain_http_bulk_file_submit_is_refused_before_sending() {
+    let (port, fake) = start_fake();
+    let zb = plaintext_client(port, "plain-submit-key");
+    let file = ZBFile::from_content(b"email\na@example.com\n".to_vec());
+
+    assert_refused_plaintext("bulk_validation_file_submit", zb.bulk_validation_file_submit(&file));
+    assert_refused_plaintext("ai_scoring_file_submit", zb.ai_scoring_file_submit(&file));
+    assert_nothing_sent(&fake, "bulk file submit");
+}
+
+#[test]
+fn plain_http_bulk_getfile_is_refused_before_sending() {
+    let (port, fake) = start_fake();
+    let zb = plaintext_client(port, "plain-getfile-key");
+    let options = ZBGetFileOptions {
+        download_type: Some(zb_download_type::COMBINED.to_string()),
+        activity_data: Some(true),
+    };
+
+    assert_refused_plaintext("bulk_validation_result_fetch", zb.bulk_validation_result_fetch("fid"));
+    assert_refused_plaintext(
+        "bulk_validation_result_fetch_with_options",
+        zb.bulk_validation_result_fetch_with_options("fid", &options),
+    );
+    assert_refused_plaintext("ai_scoring_result_fetch", zb.ai_scoring_result_fetch("fid"));
+    assert_refused_plaintext(
+        "ai_scoring_result_fetch_with_options",
+        zb.ai_scoring_result_fetch_with_options("fid", &options),
+    );
+    assert_refused_plaintext("email_finder_result_fetch", zb.email_finder_result_fetch("fid"));
+    assert_refused_plaintext("domain_search_result_fetch", zb.domain_search_result_fetch("fid"));
+    assert_nothing_sent(&fake, "bulk getfile");
+}
+
+#[test]
+fn plain_http_finder_domain_search_and_list_evaluator_uploads_are_refused_before_sending() {
+    let (port, fake) = start_fake();
+    let zb = plaintext_client(port, "plain-upload-key");
+    let options = ZBEmailFinderFileOptions {
+        first_name_column: Some(2),
+        ..Default::default()
+    };
+
+    assert_refused_plaintext(
+        "send_email_finder_file",
+        zb.send_email_finder_file(1, &options, "leads.csv", &b"example.com,john\n"[..]),
+    );
+    assert_refused_plaintext(
+        "send_domain_search_file",
+        zb.send_domain_search_file(1, Some(true), "domains.csv", &b"example.com\n"[..]),
+    );
+    assert_refused_plaintext(
+        "send_list_evaluator_file",
+        zb.send_list_evaluator_file(1, "list.csv", &b"a@example.com\n"[..]),
+    );
+    assert_nothing_sent(&fake, "multipart uploads");
+}
+
+#[test]
+fn plain_http_inbox_placement_is_refused_before_sending_the_bearer_key() {
+    let (port, fake) = start_fake();
+    let zb = plaintext_client(port, "plain-ipt-key");
+
+    assert_refused_plaintext("get_inbox_placement_providers", zb.get_inbox_placement_providers());
+    assert_refused_plaintext("get_inbox_placement_test_types", zb.get_inbox_placement_test_types());
+    assert_refused_plaintext(
+        "create_inbox_placement_test",
+        zb.create_inbox_placement_test("t", &CreateInboxPlacementTestOptions::default()),
+    );
+    assert_refused_plaintext("get_inbox_placement_test", zb.get_inbox_placement_test("1"));
+    assert_refused_plaintext(
+        "list_inbox_placement_tests",
+        zb.list_inbox_placement_tests(&ListInboxPlacementTestsOptions::default()),
+    );
+    assert_refused_plaintext("delete_inbox_placement_test", zb.delete_inbox_placement_test("1"));
+    assert_refused_plaintext("get_inbox_placement_webhook", zb.get_inbox_placement_webhook());
+    assert_refused_plaintext(
+        "set_inbox_placement_webhook",
+        zb.set_inbox_placement_webhook("https://example.com/hook"),
+    );
+    assert_nothing_sent(&fake, "inbox placement");
+}
+
+/// Every other request path, so a new one that skips the check is caught here.
+#[test]
+fn plain_http_is_refused_on_every_other_request_path() {
+    let (port, fake) = start_fake();
+    let zb = plaintext_client(port, "plain-other-key");
+    let day = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+
+    assert_refused_plaintext("get_credits", zb.get_credits());
+    assert_refused_plaintext("get_api_usage", zb.get_api_usage(day, day));
+    assert_refused_plaintext("get_activity_data", zb.get_activity_data("a@example.com"));
+    assert_refused_plaintext("score_email", zb.score_email("a@example.com"));
+    assert_refused_plaintext("score_email_post", zb.score_email_post("a@example.com"));
+    assert_refused_plaintext("validate_email", zb.validate_email("a@example.com"));
+    assert_refused_plaintext(
+        "validate_email_with_options (POST)",
+        zb.validate_email_with_options(
+            "a@example.com",
+            "",
+            &ZBValidateOptions {
+                use_post: true,
+                ..Default::default()
+            },
+        ),
+    );
+    assert_refused_plaintext(
+        "batch_validate",
+        zb.batch_validate(vec![("a@example.com".into(), String::new())]),
+    );
+    assert_refused_plaintext(
+        "find_email_v2",
+        zb.find_email_v2().first_name("john").domain("example.com").call(),
+    );
+    assert_refused_plaintext("domain_search_v2", zb.domain_search_v2().domain("example.com").call());
+    assert_refused_plaintext("bulk_validation_file_status_check", zb.bulk_validation_file_status_check("fid"));
+    assert_refused_plaintext("bulk_validation_result_delete", zb.bulk_validation_result_delete("fid"));
+    assert_refused_plaintext("ai_scoring_file_status_check", zb.ai_scoring_file_status_check("fid"));
+    assert_refused_plaintext("ai_scoring_result_delete", zb.ai_scoring_result_delete("fid"));
+    assert_refused_plaintext("email_finder_file_status", zb.email_finder_file_status("fid"));
+    assert_refused_plaintext("email_finder_result_delete", zb.email_finder_result_delete("fid"));
+    assert_refused_plaintext("domain_search_file_status", zb.domain_search_file_status("fid"));
+    assert_refused_plaintext("domain_search_result_delete", zb.domain_search_result_delete("fid"));
+    assert_refused_plaintext("send_evaluated_file", zb.send_evaluated_file("fid"));
+    assert_refused_plaintext("get_list_evaluator_result", zb.get_list_evaluator_result("fid"));
+    assert_refused_plaintext("add_filter", zb.add_filter("allow", "email", "x@example.com"));
+    assert_refused_plaintext("list_filters", zb.list_filters(false));
+    assert_refused_plaintext("delete_filter", zb.delete_filter("allow", "email", "x@example.com"));
+    assert_refused_plaintext("list_s3_files", zb.list_s3_files(None, None));
+    assert_refused_plaintext(
+        "validate_s3_file",
+        zb.validate_s3_file("f.csv", true, None, "https://example.com/done"),
+    );
+    assert_refused_plaintext("export_s3_file", zb.export_s3_file("fid", None));
+    assert_refused_plaintext(
+        "validate_sftp_file",
+        zb.validate_sftp_file("f.csv", true, None, "https://example.com/done"),
+    );
+    assert_refused_plaintext("export_sftp_file", zb.export_sftp_file("fid", None));
+    assert_nothing_sent(&fake, "other request paths");
+}
+
+/// The plaintext client itself works: the same requests reach the fake once
+/// the override is an allowed loopback URL. Without this, the tests above
+/// could pass because the name never resolved rather than because the rule
+/// held.
+#[test]
+fn the_plaintext_fixture_does_reach_the_fake() {
+    let (port, fake) = start_fake();
+    let mut zb = plaintext_client(port, "plain-control-key");
+    zb.url_provider.inbox_placement_url = format!("http://127.0.0.1:{port}/api/ipt");
+    zb.get_inbox_placement_providers().unwrap();
+    assert_eq!(only(&fake).authorization, "Bearer plain-control-key");
+
+    // And the resolve override is live: with the rule bypassed by hand, a raw
+    // request to the plain-http name lands on the fake.
+    zb.client
+        .get(format!("http://{PLAIN_HOST}:{port}/api/ipt/providers"))
+        .send()
+        .unwrap();
+    assert_eq!(fake.len(), 1);
+}
+
+// -- status_code() wherever a response arrived -------------------------------
+
+#[test]
+fn getfile_errors_carry_the_http_status() {
+    let (port, _fake) = start_fake();
+
+    let error = client(port, "html-403-file").bulk_validation_result_fetch("fid").unwrap_err();
+    assert_eq!(error.status_code(), Some(403), "{error:?}");
+    assert!(error.to_string().contains("Access denied"));
+    assert_short(&error);
+
+    let error = client(port, "cf-json-file").ai_scoring_result_fetch("fid").unwrap_err();
+    assert_eq!(error.status_code(), Some(403), "{error:?}");
+    assert!(error.to_string().contains("Access denied"));
+
+    let error = client(port, "html-200-file").email_finder_result_fetch("fid").unwrap_err();
+    assert_eq!(error.status_code(), Some(200), "{error:?}");
+    assert!(error.to_string().contains("Access denied"));
+
+    let error = client(port, "double-error-file").domain_search_result_fetch("fid").unwrap_err();
+    assert_eq!(error.status_code(), Some(400), "{error:?}");
+    assert_eq!(error.to_string(), "api_key is invalid");
+}
+
+#[test]
+fn a_batch_account_level_error_carries_the_http_status() {
+    let (port, _fake) = start_fake();
+    let error = client(port, "batch-account-user")
+        .batch_validate(vec![("a@example.com".into(), String::new())])
+        .unwrap_err();
+    // The API reports it with an HTTP 200.
+    assert_eq!(error.status_code(), Some(200), "{error:?}");
+    match error {
+        ZBError::ApiError { message, .. } => {
+            assert!(message.contains("Invalid API Key"), "{message}");
+        }
+        other => panic!("expected an ApiError, got {other:?}"),
+    }
+}
+
+/// Errors raised before any request have no status.
+#[test]
+fn errors_without_a_response_have_no_status() {
+    let error = ZeroBounce::new("").validate_email("a@example.com").unwrap_err();
+    assert_eq!(error.status_code(), None);
+    let error = ZeroBounce::with_base_url("key", "http://api.zerobounce.net/v2/").err().unwrap();
+    assert_eq!(error.status_code(), None);
 }

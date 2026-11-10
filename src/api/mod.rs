@@ -163,7 +163,7 @@ impl ZeroBounce {
             query_args.insert("last_name", last_name);
         }
 
-        let response_content = self.generic_get_request(
+        let response_content = self.finder_get_request(
             self.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
 
@@ -345,7 +345,7 @@ impl<'a> FindEmailV2Builder<'a> {
             }
         }
 
-        let response_content = self.client.generic_get_request(
+        let response_content = self.client.finder_get_request(
             self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
 
@@ -399,7 +399,7 @@ impl<'a> DomainSearchV2Builder<'a> {
             query_args.insert("company_name", c);
         }
 
-        let response_content = self.client.generic_get_request(
+        let response_content = self.client.finder_get_request(
             self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
 

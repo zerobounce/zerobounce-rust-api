@@ -7,59 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-11
+
+### Breaking
+
+Upgrading from 2.x: each change below can stop 2.1.3 code from compiling, or change what it gets back, and says what to do.
+
+- `ZeroBounce::with_base_url` returns `ZBResult<ZeroBounce>` instead of `ZeroBounce`. It returns an error, rather than accepting the URL as 2.1.3 did, when the base URL is not `https://`; `http://` is accepted only for the exact hosts `127.0.0.1`, `localhost` and `[::1]`, for local tests. Add `?` (or handle the error) at each call. `ZeroBounce::new` is unchanged.
+- Every request applies the same rule to its final URL, including URLs built from `url_provider` fields you set yourself. A plain `http://` URL on any other host fails with `ZBError::ExplicitError` before a connection is opened; 2.1.3 sent such requests, API key included, over plain http.
+- `ZBError` has a new variant, `ApiError { status, message }`, and is now `#[non_exhaustive]`. An exhaustive `match` on `ZBError` no longer compiles (E0004): add a `_` arm. A variant added later will not be a breaking change.
+- A failed API response is `ZBError::ApiError`, where 2.1.3 returned `ExplicitError` with the raw body: a non-2xx status, an HTML error page, an error body on an HTTP 200 (`{"success": false}`, or the `{"error": ...}` an invalid or drained key gets), a bulk `getfile` error, and the `batch_validate` account-level error. Match `ApiError`, or read `ZBError::status_code()`, where you matched `ExplicitError` for these.
+- `validate_email`, `validate_email_and_ip`, `batch_validate`, and the bulk validation and AI scoring submit, status and delete calls report a 2xx body they cannot parse as `ExplicitError("ZeroBounce returned a response that is not valid JSON.")`; 2.1.3 returned `ZBError::JsonError` with serde's message.
+- `batch_validate` returns `Err` for an account-level failure (an error for the address `all`, such as an invalid key or no credits). 2.1.3 returned `Ok`, with the failure in `errors`. An error for one address still comes back on the `Ok` result.
+- `ZBValidateSubStatus` has a new variant, `AiAgentMailbox`, and both `ZBValidateSubStatus` and `ZBValidateStatus` are now `#[non_exhaustive]`: an exhaustive `match` needs a `_` arm. The sub-status `"ai_agent_mailbox"` parsed to `UnknownValue("ai_agent_mailbox")` in 2.1.3 and parses to `AiAgentMailbox` now, so code that matched the `UnknownValue` form must match the new variant.
+- `ApiBaseUrl` is now `#[non_exhaustive]`: a `match` on it needs a `_` arm, so a region added later is not a breaking change.
+- `ZBUrlProvider` has two new public fields, `list_evaluator_url` and `inbox_placement_url`, so a 2.1.3 struct literal fails with E0063. It is also now `#[non_exhaustive]`, so it cannot be built with a struct literal outside the crate at all: start from `ZBUrlProvider::default()` and assign the fields you change. A base URL added later will not be a breaking change. It now derives `Clone` and `Debug`.
+- `ZBValidation` has new public fields (`active_in_days`, `active_first_seen`, `domain_website_exists`, `domain_registrant_company_name`, `message`), and `ApiUsage` has new counters (`sub_status_leading_period_removed`, `sub_status_alias_address`). Both are now `#[non_exhaustive]`, so neither can be built with a struct literal outside the crate; build them with `serde_json` in tests. A field added later will not be a breaking change.
+- Responses have size limits: a JSON response over 16 MiB fails with "response body exceeds size limit", and a bulk `getfile` download over 256 MiB fails with "getfile response exceeds size limit". Reading stops one byte past the limit. 2.1.3 read a response of any size.
+
 ### Added
 
-- `ZBValidateOptions` for single validation: `timeout`, `activity_data`, `verify_plus`, and `use_post` (form-encoded `POST /v2/validate`). The same options apply to `batch_validate_with_options`.
+- `validate_email_with_options` and `ZBValidateOptions`: `timeout` (3–60 seconds), `activity_data`, `verify_plus`, `domain_info`, `greylist_processing`, `callback_url`, and `use_post` (form-encoded `POST /v2/validate`). `callback_url` needs `greylist_processing: Some(true)` and must not be blank; both are checked before a request is sent.
+- `batch_validate_with_options`, taking the same `ZBValidateOptions` (`timeout` 10–120 seconds, `activity_data`, `verify_plus`). `timeout` is sent as a JSON string: sent as a number, the live API rejects the whole batch with an account-level error.
+- `ZBValidation` fields: `active_in_days`, `active_first_seen`, `domain_website_exists` and `domain_registrant_company_name` (with `domain_info`), and `message`, read from the API's `Message` key. A repeated `greylist_processing` validate answers with nothing but `{"Message": "Greylist validation still in progress. Please try again later."}`, so `address`, `status`, `sub_status`, `free_email` and `processed_at` default when absent and that answer is a `ZBValidation` whose `message` says to try again.
 - `score_email` (`GET /v2/scoring`) and `score_email_post` (form-encoded `POST /v2/scoring`).
-- Bulk email finder, bulk domain search, list evaluator, filters, and S3 bulk (`validate_s3_file`, `score_s3_file`, `export_s3_file`, `list_s3_files`, `email_finder_s3_file`, `domain_search_s3_file`).
-- Bulk email finder and bulk domain search `getfile` and `deletefile`: `email_finder_result_fetch`, `email_finder_result_delete`, `domain_search_result_fetch`, `domain_search_result_delete`. They follow the same rules as `bulk_validation_result_fetch` / `bulk_validation_result_delete`: the file bytes come back as `ZBBulkResponse::Content`, and a JSON body, including an HTTP 200 carrying `{"success": false}`, is an error.
-- `ZBEmailFinderFileOptions` for bulk email finder `sendfile`: `first_name_column`, `full_name_column`, `middle_name_column`, `last_name_column`, and `has_header_row`.
-- SFTP/FTP bulk: `validate_sftp_file`, `score_sftp_file`, `email_finder_sftp_file`, `domain_search_sftp_file`, and `export_sftp_file`. The server, path and protocol come from your ZeroBounce settings. `validate_sftp_file` takes `file_name` as `Option` because the docs list it as optional there alone; `export_sftp_file` takes `export_path` rather than the `export_bucket` `export_s3_file` uses.
-- `ZBValidateOptions` accepts `domain_info`, `greylist_processing`, and `callback_url`. `callback_url` needs `greylist_processing: Some(true)` and is rejected without it, and when blank, before a request is sent.
-- `ZBValidation` carries `domain_website_exists`, `domain_registrant_company_name`, and `message`. `message` is read from the API's `Message` key, returned while greylist processing is still running.
-- Inbox Placement Tester on `https://bulkapi.zerobounce.net/api/ipt`: `get_inbox_placement_providers`, `get_inbox_placement_test_types`, `create_inbox_placement_test`, `get_inbox_placement_test`, `list_inbox_placement_tests`, `delete_inbox_placement_test`, `get_inbox_placement_webhook`, `set_inbox_placement_webhook`.
-- `ZBUrlProvider` gains `list_evaluator_url` and `inbox_placement_url`, both overridable.
-- `ZeroBounceWarmup`, a client for the Warmup API. It is a separate product with its own host (`https://warmup-api.zerobounce.net`), its own team-scoped key sent in an `API-Key` header, and all 26 documented endpoints, including the seed-list and statistics CSV downloads.
-- `ZBError::ApiError { status, message }` and `ZBError::status_code()`, so callers can tell a Cloudflare 403 from an API 400/404 and a Warmup 429.
+- Bulk email finder and bulk domain search files, on the bulk host without the `/v2` path: `send_email_finder_file`, `email_finder_file_status`, `email_finder_result_fetch`, `email_finder_result_delete`, `send_domain_search_file`, `domain_search_file_status`, `domain_search_result_fetch` and `domain_search_result_delete`. `send_email_finder_file` takes a `ZBEmailFinderFileOptions` (`first_name_column`, `full_name_column`, `middle_name_column`, `last_name_column`, `has_header_row`) and requires one of `first_name_column` or `full_name_column`, because the API rejects a file that carries neither. `send_domain_search_file` takes `has_header_row` and omits it when `None`, so the account default applies. The `getfile` and `deletefile` calls follow the same rules as `bulk_validation_result_fetch` and `bulk_validation_result_delete`.
+- List evaluator: `send_list_evaluator_file` and `get_list_evaluator_result`, on `ZBUrlProvider::list_evaluator_url` (the file id is URL-encoded as one path segment), and `send_evaluated_file(file_id)` on the bulk base. `send_evaluated_file` posts `file_id` as a form field, because the endpoint rejects the file upload its docs describe.
+- Filters: `add_filter`, `list_filters` and `delete_filter`.
+- Amazon S3 bulk: `list_s3_files`, `validate_s3_file`, `score_s3_file`, `email_finder_s3_file`, `domain_search_s3_file` and `export_s3_file`. The four jobs take `file_name`, `has_header_row`, `remove_duplicates` and `return_url`; `file_name` and `return_url` are required `&str`s, because the API answers "This field is required" without them. `export_s3_file` takes `export_bucket` as an `Option<&str>`: `None` uses the export bucket from your ZeroBounce settings, and `Some("")` is rejected before a request.
+- SFTP/FTP bulk: `validate_sftp_file`, `score_sftp_file`, `email_finder_sftp_file`, `domain_search_sftp_file` and `export_sftp_file`. The server, path and protocol come from your ZeroBounce settings. The jobs take the same arguments as the S3 ones; `validate_sftp_file` requires `file_name` too, although the docs list it as optional for that endpoint, because the API rejects a request without it. `export_sftp_file` takes `export_path` rather than the `export_bucket` `export_s3_file` uses.
+- Inbox Placement Tester on `https://bulkapi.zerobounce.net/api/ipt`: `get_inbox_placement_providers`, `get_inbox_placement_test_types`, `create_inbox_placement_test`, `get_inbox_placement_test`, `list_inbox_placement_tests`, `delete_inbox_placement_test`, `get_inbox_placement_webhook` and `set_inbox_placement_webhook`. It sends the key in an `Authorization: Bearer` header, never in a query string, and an error body's `detail` text becomes the error message.
+- `ZBUrlProvider::list_evaluator_url` and `inbox_placement_url`, both overridable, with `list_evaluator_url_of` and `inbox_placement_url_of`.
+- `ZeroBounceWarmup`, a client for the Warmup API. It is a separate product with its own host (`https://warmup-api.zerobounce.net`), its own team-scoped key sent in an `API-Key` header, and all 26 documented endpoints, including the seed-list and statistics CSV downloads. It rejects a key with surrounding whitespace or control characters, which the HTTP library would otherwise quote unredacted in its own error, and `test_smtp_configuration` masks the username and password out of every error it raises.
+- `ZBError::ApiError { status, message }` and `ZBError::status_code()`, so callers can tell a Cloudflare 403 from an API 400/404 and a Warmup 429. `status_code()` is `Some` for every failed API response, including bulk `getfile` errors and the failures the API reports with an HTTP 200, such as the `batch_validate` account-level error. It is `None` for an argument or URL rejected before a request, a transport error, and a 2xx body that could not be parsed.
+- `Display` and `std::error::Error` for `ZBError`, so it works with `?` into `Box<dyn Error>` and with error-handling crates. 2.1.3 implemented only `Debug`.
 - An opt-in live API suite behind the `live` cargo feature. `cargo test` and CI never compile it; running it takes `cargo test --features live --test live_api` with keys in the environment, and it only spends credits or changes the account behind `ZEROBOUNCE_LIVE_SPEND=1` and `ZEROBOUNCE_LIVE_CHANGES=1`.
 
 ### Changed
 
-- `send_email_finder_file` takes a `&ZBEmailFinderFileOptions` and sends the name columns and `has_header_row`, which it never sent before. It requires one of `first_name_column` or `full_name_column`: the API cannot work out a person from a domain alone, and rejects a file that carries neither.
-- `send_domain_search_file` takes `has_header_row` and sends it. Unset (`None`), it is omitted and the account default applies; before, it could not be sent at all, so a file with a header row had its first row searched.
-- `validate_s3_file` and `score_s3_file` take `has_header_row`, `remove_duplicates`, and `return_url`, and send them, like their SFTP twins already did. They sent `file_name` alone, which the live API rejects: `return_url` is required, so it is a `&str` rather than an `Option`.
-- `export_s3_file` takes `export_bucket` as an `Option<&str>`. It is optional — `None` uses the export bucket from your ZeroBounce settings — and was wrongly rejected when empty, matching `export_sftp_file`.
 - `find_email_v2` no longer requires `first_name`. The API treats it as optional and answers with the domain's address formats without it. An explicitly empty `first_name` is still rejected, and `domain_search_v2` is unchanged.
-- List evaluator requests use `ZBUrlProvider::list_evaluator_url` instead of building the path from the bulk base, and the file id is URL-encoded as one path segment. `send_evaluated_file` stays on the bulk base.
-
-- API requests time out after 120 seconds and do not follow redirects.
-- `batch_validate` sends `timeout` as a JSON string. Sent as a number, the live API rejects the whole batch with an account-level error.
-- The Inbox Placement Tester authenticates with an `Authorization: Bearer` header instead of an `api_key` parameter, so the key no longer reaches a query string that gets logged.
-- `send_evaluated_file(file_id)` posts the list evaluator's `file_id` as a form field. The endpoint rejects a file upload with "file_id: This field is required", so it no longer takes a file.
-- The S3 and SFTP/FTP jobs require `file_name` and `return_url`, `validate_sftp_file` included, so both are now `&str` rather than `Option`. The API answers "This field is required" otherwise.
-- A base URL must be `https://`, except `http://127.0.0.1`, `http://localhost`, and `http://[::1]` for tests.
+- The client that `ZeroBounce::new` and `ZeroBounce::with_base_url` build times out after 120 seconds and does not follow redirects. 2.1.3 used reqwest's default blocking client, which times out after 30 seconds and follows up to 10 redirects. The `client` field is public: a client you build and assign yourself keeps the settings you give it.
+- An empty API key is rejected before a request is sent.
+- The crate declares `rust-version = "1.88"`, the oldest Rust its current dependencies build with: recent `encoding_rs` and `icu_*` releases, pulled in through `reqwest`, require 1.88. Builds and tests pass on 1.88.0, and Cargo refuses 1.87.0 with "rustc 1.87.0 is not supported by the following packages".
 
 ### Fixed
 
-- `get_api_usage` no longer fails outright. The API returns only the counters that apply to the account and the date range asked for, and an ordinary response carries neither `sub_status_gold` nor `sub_status_role_based_accept_all`; deserializing them as required fields failed the whole call, reported as "ZeroBounce returned a response that is not valid JSON". Every counter on `ApiUsage` now defaults to 0 when absent, so a counter the API adds or drops later is no longer fatal. `sub_status_leading_period_removed` and `sub_status_alias_address`, which the API does return, are now read.
-
-- `{"success": false}` on an HTTP 200 is an error instead of a result. The API answers an unknown bulk file id that way.
-- An error body whose JSON carries a `detail` string (the Inbox Placement Tester, Django REST framework) returns that text.
-
-- An HTML "Access denied" page is returned as a short `ZBError`. An HTML page with status 200 is an error as well, including bulk `getfile`, instead of file bytes or a JSON parse.
-- Empty and non-JSON bodies are a short error. The message is no longer a serde parse dump, and a repeated `Error:` / `[Error]:` prefix is removed.
-- `batch_validate` returns an error for an account-level failure (HTTP 200, error for address `all`, such as an invalid API key or no credits). An error for one address stays on the successful result.
-- AI scoring `sendfile` does not send name, gender, or IP columns, or `allow_phase_2`.
-- An empty API key is rejected before a request is sent.
-- `validate` timeout must be 3–60 seconds. `batch_validate` timeout must be 10–120 seconds.
+- An invalid or drained API key reported a misleading parse error, or no error at all. The API answers one with an HTTP 200 and no `success` field: `{"error": "Invalid API key or your account ran out of credits"}` from `validate_email` and `get_activity_data`, `{"error": "Invalid API key"}` from `get_api_usage`, and `{"Message": ...}` from the email finder and domain search. 2.1.3 passed these to the deserializer, which failed on the unexpected shape with a `ZBError::JsonError` naming a missing field (for example missing field `address` from `validate_email`), and `domain_search_v2` returned an empty `DomainSearchResponseV2`. Each is now a `ZBError::ApiError` carrying the API's message; the filters, new in this release, get the same treatment for their `{"Error": ...}` answer. `message`, `Message` and `detail` decide failure only for the email finder and domain search, because successful responses use them too: a bulk submit answers `{"success": true, "message": "File Accepted"}`, and a filter change answers with a bare `Message`. `get_credits` still returns `-1` for an invalid key, as documented.
+- `get_api_usage` no longer fails outright. The API returns only the counters that apply to the account and the date range asked for, and an ordinary response carries neither `sub_status_gold` nor `sub_status_role_based_accept_all`; 2.1.3 required both, so the whole call failed with a `ZBError::JsonError` naming the missing field. Every counter on `ApiUsage` now defaults to 0 when absent, so a counter the API adds or drops later is no longer fatal. `sub_status_leading_period_removed` and `sub_status_alias_address`, which the API does return, are now read.
+- `{"success": false}` on an HTTP 200 is an error instead of a result. The API answers an unknown bulk file id that way; 2.1.3 returned it from `deletefile` as an `Ok` `ZBFileFeedback` with `success: false`, and from `filestatus` as a `JsonError`.
+- An HTML "Access denied" page is returned as a short error. An HTML page with status 200 is an error as well, including on bulk `getfile`, where 2.1.3 returned the page as file bytes.
+- Empty and non-JSON bodies are a short error. The message is no longer the raw body or a serde parse dump, and a repeated `Error:` / `[Error]:` prefix is removed.
+- AI scoring `sendfile` no longer sends the name, gender, or IP columns. (`allow_phase_2` was already sent for validation `sendfile` only.)
 
 ### Security
 
-- JSON and bulk get-file responses now stop reading at their size limits, preventing oversized upstream bodies from exhausting memory before the limit check. Warmup responses use the same bounded reads.
+- Plain `http://` is refused on every request path, including bulk file submit, bulk `getfile`, the finder, domain search and list evaluator uploads, and the Inbox Placement Tester, so an `http://` override on `url_provider` can no longer send the API key in cleartext. See Breaking.
 - Redirects are disabled, so a 3xx response cannot send the API key to another host.
+- The API key is replaced with `REDACTED` in the URL a `ZBError::RequestError` carries, so printing a transport error no longer prints the key.
+- Debug builds no longer print every raw API response to stderr. 2.1.3 did, with `eprintln!`.
 - Error values no longer include the raw HTML access-denied page.
-- A Warmup API key with surrounding whitespace or control characters is rejected, because the transport would otherwise quote it unredacted in its own error.
-- The Warmup SMTP test masks the username and password out of every error it raises.
+- JSON and bulk `getfile` responses are read only up to their size limits, so an oversized body cannot exhaust memory. See Breaking.
+
+## [2.1.3] - 2026-08-14
+
+No library code changes from 2.1.2; only the crate version changed.
+
+### Changed
+
+- README: Docker test instructions run from the `sdk-docs/` folder of the SDKs monorepo, and the Publish section lists the release steps (bump `Cargo.toml`, tag, run the Publish workflow) instead of linking to the sdk-docs crates.io guide.
+- CI: `actions/checkout` v7 and CodeQL actions 4.36.3.
 
 ## [2.1.2] - 2026-06-10
 
@@ -106,7 +122,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial client for validation, credits, activity, and bulk file calls.
 
-[Unreleased]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.1.3...HEAD
+[Unreleased]: https://github.com/zerobounce/zerobounce-rust-api/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.1.3...v3.0.0
+[2.1.3]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.1.2...v2.1.3
 [2.1.2]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.1.0...v2.1.2
 [2.1.0]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.0.11...v2.1.0
 [2.0.11]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.0.0...v2.0.11

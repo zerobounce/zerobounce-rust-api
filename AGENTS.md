@@ -57,6 +57,7 @@ log, a fixture or a message.
 - **Empty `ip_address` is omitted** on single validate. Batch items always include `ip_address`, and an empty string is sent.
 - **`validate` timeout is 3–60 seconds. `batch_validate` timeout is 10–120 seconds.** Out-of-range values are rejected before a request.
 - **Failures are `ZBError`, which implements `std::error::Error`.** The message must be short: no raw HTML, no megabyte body, no serde dump, and no `Error: Error:` prefix. An account-level batch error (`email_address` `all`) is `Err`. A per-address error stays on the `Ok` result. A failed API response is `ZBError::ApiError`, whose status is reachable through `ZBError::status_code()`; the key is never in the message.
+- **Every request goes through `parse_request_url` on its final URL**: `https://`, or `http://` only for the exact hosts `127.0.0.1`, `localhost` and `[::1]`. `url_provider` is public, so a new request path that skips it can send the key in cleartext; `plain_http_is_refused_on_every_other_request_path` in `tests/offline_api.rs` lists every path and must grow with each new one.
 - **Tests must not call the live API.** Point `url_provider` at `http://127.0.0.1` or use `mockito`.
 - Match the surrounding style. Do not reformat unrelated code.
 
@@ -65,9 +66,9 @@ log, a fixture or a message.
 `CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
 
 - Add every user-visible change to `## [Unreleased]` in the same commit as the change.
-- Group entries under these headings, in this order, omitting empty ones: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
+- Group entries under these headings, in this order, omitting empty ones: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`. A major release opens with a `Breaking` section that tells users of the previous major what to change.
 - Write for SDK users: name the method, option, or behaviour, and say what changed. Leave out CI-only changes, internal refactors, and fixes to code that was never released.
-- At 2.y.z, a breaking change bumps the major version, a new method or option bumps the minor version, and fixes alone bump the patch version.
+- A breaking change bumps the major version, a new method or option bumps the minor version, and fixes alone bump the patch version. Public enums and the structs that grow with the API (`ZBError`, `ZBValidateStatus`, `ZBValidateSubStatus`, `ApiBaseUrl`, `OnboardingModel`, `ZBUrlProvider`, `ZBValidation`, `ApiUsage`) are `#[non_exhaustive]`, so adding a variant or field to them is not breaking.
 
 ## Releasing
 

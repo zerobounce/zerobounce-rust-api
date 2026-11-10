@@ -69,7 +69,11 @@ mod response_limit_tests {
 }
 
 /// Enum representing the available API base URLs
+///
+/// `#[non_exhaustive]`: a region added later is not a breaking change, so a
+/// `match` on it needs a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ApiBaseUrl {
     /// Default API URL: https://api.zerobounce.net/v2/
     Default,
@@ -176,12 +180,22 @@ pub const SS_TOXIC: &str = "toxic";
 pub const SS_ACCEPT_ALL: &str = "accept_all";
 pub const SS_AI_AGENT_MAILBOX: &str = "ai_agent_mailbox";
 
+/// Every error the SDK returns.
+///
+/// `#[non_exhaustive]`: a variant added later is not a breaking change, so a
+/// `match` on it needs a `_` arm.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ZBError {
+    /// An error the SDK raised itself: an invalid argument or URL caught before
+    /// a request, or a 2xx response body it could not read.
     ExplicitError(String),
-    /// A failed API response. The status lets callers tell a 403 from
-    /// Cloudflare apart from a 400/404 from the API and a 429 from the Warmup
-    /// rate limit. Both the validation client and the Warmup client return it.
+    /// The API answered and the answer is a failure: a non-2xx status, an HTML
+    /// error page, an error body on an HTTP 200, a bulk `getfile` error, or a
+    /// `batch_validate` account-level error. `status` is the HTTP status of that
+    /// response, so callers can tell a 403 from Cloudflare apart from a 400/404
+    /// from the API and a 429 from the Warmup rate limit. Both the validation
+    /// client and the Warmup client return it.
     ApiError { status: u16, message: String },
     JsonError(serde_json::Error),
     IntParseError(std::num::ParseIntError),
@@ -203,7 +217,11 @@ impl ZBError {
         }
     }
 
-    /// The HTTP status of a failed API response, when there was one.
+    /// The HTTP status of a failed API response: `Some` for every
+    /// [`ZBError::ApiError`], including a failure the API reports with an HTTP
+    /// 200. `None` when no failed response is involved: an argument or URL
+    /// rejected before a request, a transport error, or a 2xx body that could
+    /// not be parsed.
     pub fn status_code(&self) -> Option<u16> {
         match self {
             ZBError::ApiError { status, .. } => Some(*status),

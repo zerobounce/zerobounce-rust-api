@@ -56,6 +56,30 @@ fn test_api_usage_bad_request() {
     };
 }
 
+/// LIVE: an invalid or drained key answers with an HTTP 200 and a body that
+/// is only {"error": ...}. It must fail with the API's own message, not with
+/// a parse error.
+#[test]
+fn test_api_usage_invalid_key_200() {
+    let (mut mock_server, zb_instance) = instantiate();
+
+    let mock = mock_server.mock("GET", endpoint_matcher(ENDPOINT_API_USAGE))
+        .with_status(200)
+        .with_header("content-type", CONTENT_TYPE_JSON)
+        .with_body(mock_constants::INVALID_API_KEY_200)
+        .create();
+
+    let api_usage = zb_instance.get_api_usage_overall();
+    assert!(api_usage.is_err());
+    mock.assert();
+
+    let zb_error = api_usage.unwrap_err();
+    let ZBError::ApiError { message, .. } = &zb_error else {
+        panic!("unexpected error: {:#?}", zb_error);
+    };
+    assert_eq!(message, "Invalid API key or your account ran out of credits");
+}
+
 #[test]
 fn test_api_usage_ok() {
     let (mut mock_server, zb_instance) = instantiate();

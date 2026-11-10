@@ -29,7 +29,7 @@ impl ZeroBounce {
             }
         }
 
-        let url = self.url_provider.bulk_url_of(endpoint);
+        let url = crate::parse_request_url(&self.url_provider.bulk_url_of(endpoint))?;
         let response = self.client.post(url).multipart(multi_part_form).send()?;
 
         let response_content = self.read_api_response(response)?;
@@ -75,15 +75,19 @@ impl ZeroBounce {
             }
         }
 
-        let response = self.client.get(&url).query(&query).send()?;
+        let url = crate::parse_request_url(&url)?;
+        let response = self.client.get(url).query(&query).send()?;
 
+        // From here on a response arrived, so every error carries its status
+        // (`ZBError::ApiError`) and `status_code()` can tell a Cloudflare 403
+        // from an API 400/404.
         let status = response.status();
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
-            .ok_or_else(|| ZBError::explicit("content type not specified in response"))?
+            .ok_or_else(|| ZBError::api(status.as_u16(), "content type not specified in response"))?
             .to_str()
-            .map_err(|e| ZBError::ExplicitError(e.to_string()))?
+            .map_err(|e| ZBError::api(status.as_u16(), e.to_string()))?
             .to_string();
 
         let body_bytes = crate::utility::read_limited(
@@ -97,7 +101,8 @@ impl ZeroBounce {
             || crate::utility::http_error::content_type_is_html(&content_type)
             || !status.is_success()
         {
-            return Err(ZBError::ExplicitError(
+            return Err(ZBError::api(
+                status.as_u16(),
                 crate::utility::http_error::message_from_body(
                     status.as_u16(),
                     &content_type,
@@ -114,7 +119,8 @@ impl ZeroBounce {
                 || message.len() > 500
                 || crate::utility::http_error::body_looks_like_html(&message)
             {
-                return Err(ZBError::ExplicitError(
+                return Err(ZBError::api(
+                    status.as_u16(),
                     crate::utility::http_error::message_from_body(
                         status.as_u16(),
                         &content_type,
@@ -122,7 +128,7 @@ impl ZeroBounce {
                     ),
                 ));
             }
-            return Err(ZBError::ExplicitError(message));
+            return Err(ZBError::api(status.as_u16(), message));
         }
 
         Ok(ZBBulkResponse::Content(body_bytes.into()))

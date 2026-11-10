@@ -48,10 +48,24 @@ fn html_title(body: &str) -> String {
     body[open_end + 1..open_end + close_rel].trim().to_string()
 }
 
-fn first_api_error_field(object: &serde_json::Map<String, serde_json::Value>) -> String {
-    // "detail" is how the Inbox Placement Tester (Django REST framework) reports errors.
-    for key in ["error", "message", "error_message", "Message", "detail"] {
-        match object.get(key) {
+/// Keys that only ever mean an error. Narrower than `MESSAGE_KEYS` on purpose:
+/// a successful response uses "message"/"Message" too (a bulk submit answers
+/// {"success": true, "message": "File Accepted"}, a greylisted validate carries
+/// "Message" next to the result), so those cannot decide success by themselves.
+/// "Error" is how the filters spell it: {"Error": "Invalid API key ..."}.
+const ERROR_ONLY_KEYS: [&str; 3] = ["error", "error_message", "Error"];
+
+/// Every key an error message may hide under, once the response is already
+/// known to be a failure.
+/// "detail" is how the Inbox Placement Tester (Django REST framework) reports errors.
+const MESSAGE_KEYS: [&str; 6] = ["error", "message", "error_message", "Message", "Error", "detail"];
+
+fn api_error_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    keys: &[&str],
+) -> String {
+    for key in keys {
+        match object.get(*key) {
             Some(serde_json::Value::String(text)) if !text.trim().is_empty() => {
                 return text.trim().to_string();
             }
@@ -66,6 +80,20 @@ fn first_api_error_field(object: &serde_json::Map<String, serde_json::Value>) ->
         }
     }
     String::new()
+}
+
+fn first_api_error_field(object: &serde_json::Map<String, serde_json::Value>) -> String {
+    api_error_field(object, &MESSAGE_KEYS)
+}
+
+/// The API's own message when an HTTP 200 body is nothing but an error: an
+/// "error"/"error_message" field, and no "success" field to gate on. An
+/// invalid or drained key answers every v2 endpoint that way.
+fn error_only_body(object: &serde_json::Map<String, serde_json::Value>) -> String {
+    if object.contains_key("success") {
+        return String::new();
+    }
+    api_error_field(object, &ERROR_ONLY_KEYS)
 }
 
 pub fn message_from_body(status: u16, content_type: &str, body: &str) -> String {
@@ -158,6 +186,44 @@ pub fn ensure_json_api_body(status: u16, content_type: &str, body: &str) -> ZBRe
                     message_from_body(status, content_type, body),
                 ));
             }
+            // LIVE: an invalid or drained key answers with an HTTP 200 and a
+            // body that is only {"error": "Invalid API key"} -- no "success"
+            // field to gate on. Without this the body reached serde, which
+            // failed on the unexpected shape and reported a parse error,
+            // hiding the real cause.
+            if !error_only_body(&object).is_empty() {
+                return Err(ZBError::api(
+                    status,
+                    message_from_body(status, content_type, body),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether a JSON body is nothing but a message: an object with no "success"
+/// field whose keys are all message keys, at least one a non-empty string.
+fn message_only_body(object: &serde_json::Map<String, serde_json::Value>) -> bool {
+    !object.is_empty()
+        && !object.contains_key("success")
+        && object.keys().all(|key| MESSAGE_KEYS.contains(&key.as_str()))
+        && !api_error_field(object, &MESSAGE_KEYS).is_empty()
+}
+
+/// For a call whose result is never a bare message -- the email finder and
+/// domain search -- a message-only body is an error. LIVE: guessformat answers
+/// an invalid or drained key with an HTTP 200 and
+/// {"Message": "Invalid API key or your account ran out of credits"}.
+/// Not for validate: a repeated greylist_processing request answers
+/// {"Message": "Greylist validation still in progress..."}, which is a result.
+pub fn reject_message_only_body(status: u16, content_type: &str, body: &str) -> ZBResult<()> {
+    if let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(body.trim()) {
+        if message_only_body(&object) {
+            return Err(ZBError::api(
+                status,
+                message_from_body(status, content_type, body),
+            ));
         }
     }
     Ok(())
@@ -166,4 +232,92 @@ pub fn ensure_json_api_body(status: u16, content_type: &str, body: &str) -> ZBRe
 pub fn parse_json_body<T: serde::de::DeserializeOwned>(body: &str) -> ZBResult<T> {
     serde_json::from_str(body)
         .map_err(|_| ZBError::explicit("ZeroBounce returned a response that is not valid JSON."))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::utility::ZBError;
+
+    const JSON: &str = "application/json";
+
+    fn error_message(status: u16, body: &str) -> String {
+        match ensure_json_api_body(status, JSON, body) {
+            Err(ZBError::ApiError { message, .. }) => message,
+            other => panic!("expected an ApiError, got {other:#?}"),
+        }
+    }
+
+    /// LIVE: an invalid or drained key answers with an HTTP 200 and nothing
+    /// but an "error" field. It used to reach serde and surface as a bogus
+    /// "not valid JSON" error.
+    #[test]
+    fn test_200_with_error_field_is_an_api_error() {
+        assert_eq!(
+            error_message(200, r#"{"error":"Invalid API key"}"#),
+            "Invalid API key"
+        );
+        assert_eq!(
+            error_message(
+                200,
+                r#"{"error":"Invalid API key or your account ran out of credits"}"#
+            ),
+            "Invalid API key or your account ran out of credits"
+        );
+    }
+
+    #[test]
+    fn test_200_with_error_message_field_is_an_api_error() {
+        assert_eq!(
+            error_message(200, r#"{"error_message":"Missing parameter: api_key."}"#),
+            "Missing parameter: api_key."
+        );
+    }
+
+    #[test]
+    fn test_200_with_empty_error_field_is_not_an_error() {
+        // A payload that merely carries an empty "error" is still a result.
+        assert!(ensure_json_api_body(200, JSON, r#"{"error":"","found":true}"#).is_ok());
+    }
+
+    /// A falsy "success" still decides on its own, and a truthy one wins over
+    /// a message field.
+    #[test]
+    fn test_success_field_still_decides() {
+        assert_eq!(
+            error_message(200, r#"{"success":false,"message":"File cannot be found."}"#),
+            "File cannot be found."
+        );
+        assert!(ensure_json_api_body(
+            200,
+            JSON,
+            r#"{"success":true,"message":"File Accepted","file_id":"abc"}"#
+        )
+        .is_ok());
+    }
+
+    /// A greylisted validate is a result, not an error, and it carries
+    /// "Message" with no "success" field -- the shape the narrow key list
+    /// protects.
+    #[test]
+    fn test_greylisted_validation_is_not_an_error() {
+        assert!(ensure_json_api_body(
+            200,
+            JSON,
+            r#"{"address":"a@b.com","status":"unknown","sub_status":"greylisted","Message":"Greylisted, try again later"}"#
+        )
+        .is_ok());
+    }
+
+    /// Batch validate reports per-address failures in a nested "errors" array
+    /// while the call itself succeeded.
+    #[test]
+    fn test_batch_nested_errors_are_not_a_failure() {
+        assert!(ensure_json_api_body(
+            200,
+            JSON,
+            r#"{"email_batch":[],"errors":[{"error":"Invalid email address","email_address":"bad@"}]}"#
+        )
+        .is_ok());
+    }
 }

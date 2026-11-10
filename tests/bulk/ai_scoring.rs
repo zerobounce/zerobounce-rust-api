@@ -133,7 +133,8 @@ fn test_ai_scoring_result_no_content_type() {
     assert!(response.is_err());
 
     let zb_error = response.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    // A response arrived, so the error carries its status.
+    let ZBError::ApiError { status: 200, .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
 }
@@ -153,9 +154,10 @@ fn test_ai_scoring_result_bad_request() {
     assert!(response.is_err());
 
     let zb_error = response.unwrap_err();
-    let ZBError::ExplicitError(_) = zb_error else {
+    let ZBError::ApiError { status: 400, .. } = zb_error else {
         panic!("unexpected error: {:#?}", zb_error);
     };
+    assert_eq!(zb_error.status_code(), Some(400));
 }
 
 #[test]
@@ -172,8 +174,10 @@ fn test_ai_scoring_result_json_error_http_200() {
     mock.assert();
     assert!(response.is_err());
 
-    let ZBError::ExplicitError(msg) = response.unwrap_err() else {
-        panic!("expected ExplicitError");
+    let zb_error = response.unwrap_err();
+    assert_eq!(zb_error.status_code(), Some(200));
+    let ZBError::ApiError { message: msg, .. } = zb_error else {
+        panic!("expected ApiError");
     };
     assert!(msg.contains("File deleted"), "{}", msg);
 }
