@@ -1,4 +1,8 @@
-use zero_bounce::utility::{ENDPOINT_EMAIL_FINDER, CONTENT_TYPE_JSON, ZBError, mock_constants};
+// These tests cover the deprecated find_email and domain_search on purpose.
+#![allow(deprecated)]
+
+use zero_bounce::utility::{ENDPOINT_EMAIL_FINDER, CONTENT_TYPE_JSON, ZBError};
+use crate::mock_constants;
 
 use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
 

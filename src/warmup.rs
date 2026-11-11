@@ -61,11 +61,21 @@ pub struct ManagedSending {
 
 const EMAIL_TYPES: [&str; 3] = ["transactional", "newsletter", "marketing"];
 
-#[derive(Debug)]
 pub struct ZeroBounceWarmup {
     api_key: String,
     root: String,
     client: reqwest::blocking::Client,
+}
+
+/// Names the type and every field, with the API key shown as `***`.
+impl std::fmt::Debug for ZeroBounceWarmup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ZeroBounceWarmup")
+            .field("api_key", &crate::utility::redacted_key(&self.api_key))
+            .field("root", &self.root)
+            .field("client", &self.client)
+            .finish()
+    }
 }
 
 impl ZeroBounceWarmup {
@@ -79,13 +89,7 @@ impl ZeroBounceWarmup {
         if api_key.trim().is_empty() {
             return Err(ZBError::explicit("api_key is required"));
         }
-        // A key with surrounding whitespace or control characters would be
-        // quoted, unredacted, in the HTTP library's own error.
-        if api_key != api_key.trim() || api_key.chars().any(|c| c.is_control()) {
-            return Err(ZBError::explicit(
-                "api_key has surrounding whitespace or control characters",
-            ));
-        }
+        crate::utility::check_key_text(api_key)?;
         // https only, with the same loopback exception the validation client
         // makes so the offline suite can point at a local fake.
         crate::parse_request_url(base_url)
@@ -170,7 +174,7 @@ impl ZeroBounceWarmup {
         if (300..400).contains(&status) {
             return Err(ZBError::api(
                 status,
-                "ZeroBounce returned a redirect, which this client does not follow.",
+                crate::utility::http_error::REDIRECT_REFUSED_MESSAGE,
             ));
         }
         if status > 299 {

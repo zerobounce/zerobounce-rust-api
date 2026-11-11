@@ -4,7 +4,7 @@
 //! so every test here asserts the path as well as the parameters.
 
 use mockito::Matcher;
-use zero_bounce::utility::mock_constants;
+use crate::mock_constants;
 use zero_bounce::utility::structures::bulk::{ZBBulkResponse, ZBEmailFinderFileOptions};
 use zero_bounce::utility::{CONTENT_TYPE_JSON, CONTENT_TYPE_STREAM};
 use zero_bounce::ZBError;

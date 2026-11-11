@@ -2,6 +2,8 @@ use std::env;
 use zero_bounce::ZeroBounce;
 use zero_bounce::utility::ZBResult;
 
+// Shows the deprecated call; see the *_v2 examples for its replacement.
+#[allow(deprecated)]
 fn main() -> ZBResult<()> {
     // Load environment variables from .env file
     dotenv::dotenv().ok();

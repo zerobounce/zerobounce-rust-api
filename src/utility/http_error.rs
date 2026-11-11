@@ -96,7 +96,15 @@ fn error_only_body(object: &serde_json::Map<String, serde_json::Value>) -> Strin
     api_error_field(object, &ERROR_ONLY_KEYS)
 }
 
+/// The error for a 3xx. Redirects are never followed: the API key travels
+/// with the request, and a redirect could send it to another host.
+pub(crate) const REDIRECT_REFUSED_MESSAGE: &str =
+    "ZeroBounce returned a redirect, which this client does not follow.";
+
 pub fn message_from_body(status: u16, content_type: &str, body: &str) -> String {
+    if (300..400).contains(&status) {
+        return REDIRECT_REFUSED_MESSAGE.into();
+    }
     if body_looks_like_html(body) || content_type_is_html(content_type) {
         let title = html_title(body);
         if title.is_empty() {

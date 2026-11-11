@@ -1,4 +1,5 @@
-use zero_bounce::utility::{ENDPOINT_VALIDATE, CONTENT_TYPE_JSON, ZBError, mock_constants};
+use zero_bounce::utility::{ENDPOINT_VALIDATE, CONTENT_TYPE_JSON, ZBError};
+use crate::mock_constants;
 use zero_bounce::utility::structures::validate_enums::ZBValidateSubStatus;
 
 use crate::common::{EMAIL, SANDBOX_IP};

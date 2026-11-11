@@ -1,4 +1,5 @@
-use zero_bounce::utility::{ENDPOINT_EMAIL_FINDER, CONTENT_TYPE_JSON, ZBError, mock_constants};
+use zero_bounce::utility::{ENDPOINT_EMAIL_FINDER, CONTENT_TYPE_JSON, ZBError};
+use crate::mock_constants;
 
 use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
 

@@ -16,7 +16,7 @@ fn main() -> ZBResult<()> {
     let zb_default = ZeroBounce::new(&api_key);
     println!("Base URL: {}", zb_default.base_url);
     
-    let find_email_response = zb_default.find_email_v2()
+    let _find_email_response = zb_default.find_email_v2()
         .first_name("John")
         .domain("example.com")
         .last_name("Doe")
@@ -29,7 +29,7 @@ fn main() -> ZBResult<()> {
     let zb_usa = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::USA)?;
     println!("Base URL: {}", zb_usa.base_url);
     
-    let find_email_response = zb_usa.find_email_v2()
+    let _find_email_response = zb_usa.find_email_v2()
         .first_name("John")
         .domain("example.com")
         .last_name("Doe")
@@ -42,7 +42,7 @@ fn main() -> ZBResult<()> {
     let zb_eu = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::EU)?;
     println!("Base URL: {}", zb_eu.base_url);
     
-    let find_email_response = zb_eu.find_email_v2()
+    let _find_email_response = zb_eu.find_email_v2()
         .first_name("John")
         .domain("example.com")
         .last_name("Doe")
@@ -56,7 +56,7 @@ fn main() -> ZBResult<()> {
     let zb_custom = ZeroBounce::with_base_url(&api_key, custom_url)?;
     println!("Base URL: {}", zb_custom.base_url);
     
-    let find_email_response = zb_custom.find_email_v2()
+    let _find_email_response = zb_custom.find_email_v2()
         .first_name("John")
         .domain("example.com")
         .last_name("Doe")
@@ -69,7 +69,7 @@ fn main() -> ZBResult<()> {
     let zb_default_explicit = ZeroBounce::with_base_url(&api_key, ApiBaseUrl::Default)?;
     println!("Base URL: {}", zb_default_explicit.base_url);
     
-    let find_email_response = zb_default_explicit.find_email_v2()
+    let _find_email_response = zb_default_explicit.find_email_v2()
         .first_name("John")
         .domain("example.com")
         .last_name("Doe")
