@@ -17,11 +17,11 @@ Add the crate to `Cargo.toml`:
 
 ```toml
 [dependencies]
-zero-bounce = "3.0.0"
+zero-bounce = "4"
 ```
 
 Requires Rust 1.88 or newer (`rust-version = "1.88"`). Upgrading from 2.x? See the
-breaking changes in the [3.0.0 changelog](https://github.com/zerobounce/zerobounce-rust-api/blob/main/CHANGELOG.md#300---2026-11-11).
+breaking changes in the [4.0.0 changelog](https://github.com/zerobounce/zerobounce-rust-api/blob/main/CHANGELOG.md#400---2026-11-12).
 
 ## How to use
 This crate uses the zero-bounce API which requires an API key. Check [this guide](https://www.zerobounce.net/docs/api-dashboard#API_keys_management) to see how to grab yours.

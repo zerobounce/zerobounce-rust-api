@@ -1,6 +1,6 @@
 [package]
 name = "zero-bounce"
-version = "3.0.0"
+version = "4.0.0"
 edition = "2021"
 rust-version = "1.88"
 description = "Wrapper library over the ZeroBounce API v2"
