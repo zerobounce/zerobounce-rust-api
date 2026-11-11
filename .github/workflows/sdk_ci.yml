@@ -29,3 +29,27 @@ jobs:
 
       - name: Run tests
         run: cargo test --no-fail-fast
+
+  msrv:
+    # Build and test on the oldest supported Rust (`rust-version` in Cargo.toml).
+    name: MSRV (Rust 1.88)
+    runs-on: ubuntu-latest
+    env:
+      # Cargo.lock is not committed, so resolve dependency versions that
+      # support this toolchain rather than the newest ones.
+      CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust 1.88
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: "1.88"
+
+      - name: Build
+        run: cargo build
+
+      - name: Run tests
+        run: cargo test --no-fail-fast

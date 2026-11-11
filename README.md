@@ -913,3 +913,7 @@ Run it by hand before every release: the offline suite proves the SDK sends what
 2. **Actions → Publish → Run workflow** with that tag.
 
 Registry: [zero-bounce on crates.io](https://crates.io/crates/zero-bounce)
+
+## License
+
+MIT. See [LICENSE](LICENSE).
