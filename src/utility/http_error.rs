@@ -1,11 +1,22 @@
 use super::{ZBError, ZBResult};
 
+/// At most the first `max_bytes` bytes of `text`, cut back to a character
+/// boundary. Slicing at a fixed byte offset panics when a multi-byte
+/// character straddles it, and response bodies are not ASCII-only.
+/// (`str::floor_char_boundary` would do this, but it is newer than the MSRV.)
+fn prefix_at_char_boundary(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 pub fn body_looks_like_html(body: &str) -> bool {
-    let sample = if body.len() > 2000 {
-        &body[..2000]
-    } else {
-        body
-    };
+    let sample = prefix_at_char_boundary(body, 2000);
     let lower = sample.to_ascii_lowercase();
     lower.contains("<!doctype html")
         || lower.contains("<html")
@@ -327,5 +338,24 @@ mod test {
             r#"{"email_batch":[],"errors":[{"error":"Invalid email address","email_address":"bad@"}]}"#
         )
         .is_ok());
+    }
+
+    /// The HTML sniff looked at `&body[..2000]`, which panicked when a
+    /// multi-byte character straddled byte 2000.
+    #[test]
+    fn test_html_sniff_does_not_split_a_multi_byte_character() {
+        for wide in ["é", "€", "😀"] {
+            for start in 2000 - wide.len() + 1..2000 {
+                let body = format!("{}{wide}{}", "a".repeat(start), "b".repeat(100));
+                assert!(!body.is_char_boundary(2000), "{wide} at {start}");
+                assert!(!body_looks_like_html(&body), "{wide} at {start}");
+                let page = format!("<html>{}{wide}</html>", "a".repeat(start - 6));
+                assert!(body_looks_like_html(&page), "{wide} at {start}");
+                assert!(ensure_json_api_body(200, JSON, &format!("{{\"city\":\"{}{wide}\"}}", "a".repeat(start - 9))).is_ok());
+            }
+        }
+        assert_eq!(prefix_at_char_boundary("aé", 2), "a");
+        assert_eq!(prefix_at_char_boundary("aé", 3), "aé");
+        assert_eq!(prefix_at_char_boundary("", 0), "");
     }
 }

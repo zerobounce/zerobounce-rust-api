@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- If the HTTP client cannot be built (for example, the TLS backend fails to initialise), `ZeroBounce::with_base_url`, `ZeroBounceWarmup::new` and `ZeroBounceWarmup::with_base_url` return `ZBError::ExplicitError("could not build the HTTP client: ...")`, and `ZeroBounce::new` panics with that message. 3.0.0 and 4.0.0 fell back to `reqwest::blocking::Client::default()`, which follows redirects and itself panics when the same client cannot be built. No client that follows redirects is used any more.
+
+### Fixed
+
+- A response body with a multi-byte UTF-8 character spanning byte 2000 panicked with `end byte index 2000 is not a char boundary` instead of returning a result or an error. Every JSON response (`validate_email`, credits, bulk status and the rest), every bulk file download (`bulk_validation_result_fetch` and the other getfile calls) and every `ZeroBounceWarmup` error body goes through the HTML check that sliced at that byte. It now cuts at a character boundary. Affects 3.0.0 and 4.0.0.
+
 ## [4.0.0] - 2026-11-12
 
 ### Breaking

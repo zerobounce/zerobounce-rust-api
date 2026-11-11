@@ -3,7 +3,6 @@ pub mod utility;
 pub mod warmup;
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 pub use crate::api::{DomainSearchV2Builder, FindEmailV2Builder};
 pub use crate::utility::structures::bulk::{
@@ -110,8 +109,14 @@ impl ZeroBounce {
     ///
     /// let zb = ZeroBounce::new("your_api_key");
     /// ```
+    ///
+    /// # Panics
+    /// When the HTTP client cannot be built (for example, the TLS backend
+    /// fails to initialise), as `reqwest::blocking::Client::new()` does.
+    /// [`with_base_url`](Self::with_base_url) returns that as an error instead.
     pub fn new(api_key: &str) -> ZeroBounce {
         Self::build(api_key, ApiBaseUrl::Default.as_str().to_string())
+            .unwrap_or_else(|error| panic!("ZeroBounce::new: {error}"))
     }
 
     /// Create a new ZeroBounce client instance with a custom base URL.
@@ -127,7 +132,8 @@ impl ZeroBounce {
     /// # Errors
     /// Returns [`ZBError::ExplicitError`] when `base_url` is not an `https://`
     /// URL. `http://` is accepted only for the exact hosts `127.0.0.1`,
-    /// `localhost` and `[::1]`, for local tests.
+    /// `localhost` and `[::1]`, for local tests. Also when the HTTP client
+    /// cannot be built.
     ///
     /// # Example
     /// ```no_run
@@ -149,27 +155,23 @@ impl ZeroBounce {
         let base_url_string = base_url.into();
         parse_request_url(&base_url_string)
             .map_err(|_| ZBError::explicit("base_url must be an https:// URL"))?;
-        Ok(Self::build(api_key, base_url_string))
+        Self::build(api_key, base_url_string)
     }
 
     /// The client both constructors share. Only [`with_base_url`](Self::with_base_url)
     /// takes a caller's URL, and it checks it first.
-    fn build(api_key: &str, base_url_string: String) -> ZeroBounce {
+    fn build(api_key: &str, base_url_string: String) -> ZBResult<ZeroBounce> {
         let url_provider = ZBUrlProvider {
             url: base_url_string.clone(),
             ..ZBUrlProvider::default()
         };
 
-        ZeroBounce {
+        Ok(ZeroBounce {
             api_key: api_key.to_string(),
             base_url: base_url_string,
-            client: reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .unwrap_or_else(|_| reqwest::blocking::Client::default()),
+            client: utility::http_client()?,
             url_provider,
-        }
+        })
     }
 
     fn require_key(&self) -> ZBResult<()> {
