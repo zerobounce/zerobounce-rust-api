@@ -24,11 +24,21 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Warnings fail the build. --all-features is left out on purpose: it would also lint
+      # the opt-in live suite (tests/live_api.rs, feature "live").
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Run tests
         run: cargo test --no-fail-fast
+
+      # Exercises the `include` list in Cargo.toml: lists what would ship to crates.io, then
+      # builds the crate from that packaged copy, so a file the build needs but `include`
+      # leaves out fails here rather than at publish time.
+      - name: Package check
+        run: |
+          cargo package --list
+          cargo package
 
   msrv:
     # Build and test on the oldest supported Rust (`rust-version` in Cargo.toml).
