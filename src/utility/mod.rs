@@ -32,6 +32,46 @@ pub(crate) fn redacted_key(api_key: &str) -> &'static str {
     }
 }
 
+/// The HTTP client both API clients use: explicit timeout, redirects never
+/// followed (the API key travels with every request, and a redirect could
+/// send it to another host). If it cannot be built there is no fallback: a
+/// default client would follow redirects.
+pub(crate) fn http_client() -> ZBResult<reqwest::blocking::Client> {
+    client_or_error(
+        reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .redirect(reqwest::redirect::Policy::none())
+            .build(),
+    )
+}
+
+fn client_or_error(
+    built: reqwest::Result<reqwest::blocking::Client>,
+) -> ZBResult<reqwest::blocking::Client> {
+    built.map_err(|error| ZBError::ExplicitError(format!("could not build the HTTP client: {error}")))
+}
+
+#[cfg(test)]
+mod http_client_tests {
+    use super::{client_or_error, ZBError};
+
+    /// A builder failure used to fall back to `Client::default()`, which
+    /// follows redirects. It is now an error.
+    #[test]
+    fn a_client_that_cannot_be_built_is_an_error_not_a_default_client() {
+        let builder_error = reqwest::blocking::Client::new()
+            .get("not a url")
+            .build()
+            .unwrap_err();
+        match client_or_error(Err(builder_error)) {
+            Err(ZBError::ExplicitError(message)) => {
+                assert!(message.starts_with("could not build the HTTP client"), "{message}")
+            }
+            other => panic!("expected an error, got {other:?}"),
+        }
+    }
+}
+
 pub const CONTENT_TYPE_JSON: &str = "application/json";
 pub const CONTENT_TYPE_STREAM: &str = "application/octet-stream";
 /// Cap JSON API responses so error pages cannot exhaust memory (RS-05).

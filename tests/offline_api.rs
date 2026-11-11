@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -1734,148 +1734,221 @@ fn assert_nothing_sent(fake: &Fake, name: &str) {
     );
 }
 
-#[test]
-fn plain_http_bulk_file_submit_is_refused_before_sending() {
-    let (port, fake) = start_fake();
-    let zb = plaintext_client(port, "plain-submit-key");
+/// Calls every public request method of `ZeroBounce` against the plain-http
+/// client and returns the names it called, so the guard below can hold them
+/// against the methods `src/` defines. Named after the `pub fn`; the v2
+/// builders are swept through their `call()`.
+#[allow(deprecated)] // find_email and domain_search are deprecated, not gone
+fn sweep_every_request_method(zb: &ZeroBounce) -> Vec<&'static str> {
+    let mut swept = Vec::new();
+    macro_rules! sweep {
+        ($name:literal, $call:expr) => {{
+            assert_refused_plaintext($name, $call);
+            swept.push($name);
+        }};
+    }
+    let day = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
     let file = ZBFile::from_content(b"email\na@example.com\n".to_vec());
-
-    assert_refused_plaintext("bulk_validation_file_submit", zb.bulk_validation_file_submit(&file));
-    assert_refused_plaintext("ai_scoring_file_submit", zb.ai_scoring_file_submit(&file));
-    assert_nothing_sent(&fake, "bulk file submit");
-}
-
-#[test]
-fn plain_http_bulk_getfile_is_refused_before_sending() {
-    let (port, fake) = start_fake();
-    let zb = plaintext_client(port, "plain-getfile-key");
-    let options = ZBGetFileOptions {
+    let getfile_options = ZBGetFileOptions {
         download_type: Some(zb_download_type::COMBINED.to_string()),
         activity_data: Some(true),
     };
-
-    assert_refused_plaintext("bulk_validation_result_fetch", zb.bulk_validation_result_fetch("fid"));
-    assert_refused_plaintext(
-        "bulk_validation_result_fetch_with_options",
-        zb.bulk_validation_result_fetch_with_options("fid", &options),
-    );
-    assert_refused_plaintext("ai_scoring_result_fetch", zb.ai_scoring_result_fetch("fid"));
-    assert_refused_plaintext(
-        "ai_scoring_result_fetch_with_options",
-        zb.ai_scoring_result_fetch_with_options("fid", &options),
-    );
-    assert_refused_plaintext("email_finder_result_fetch", zb.email_finder_result_fetch("fid"));
-    assert_refused_plaintext("domain_search_result_fetch", zb.domain_search_result_fetch("fid"));
-    assert_nothing_sent(&fake, "bulk getfile");
-}
-
-#[test]
-fn plain_http_finder_domain_search_and_list_evaluator_uploads_are_refused_before_sending() {
-    let (port, fake) = start_fake();
-    let zb = plaintext_client(port, "plain-upload-key");
-    let options = ZBEmailFinderFileOptions {
+    let finder_options = ZBEmailFinderFileOptions {
         first_name_column: Some(2),
         ..Default::default()
     };
+    let post = ZBValidateOptions {
+        use_post: true,
+        ..Default::default()
+    };
+    let done = "https://example.com/done";
 
-    assert_refused_plaintext(
+    // Main API: account, scoring, validation, finder and domain search.
+    sweep!("get_credits", zb.get_credits());
+    sweep!("get_api_usage", zb.get_api_usage(day, day));
+    sweep!("get_api_usage_overall", zb.get_api_usage_overall());
+    sweep!("get_activity_data", zb.get_activity_data("a@example.com"));
+    sweep!("score_email", zb.score_email("a@example.com"));
+    sweep!("score_email_post", zb.score_email_post("a@example.com"));
+    sweep!("validate_email", zb.validate_email("a@example.com"));
+    sweep!("validate_email_and_ip", zb.validate_email_and_ip("a@example.com", "1.1.1.1"));
+    sweep!(
+        "validate_email_with_options",
+        zb.validate_email_with_options("a@example.com", "", &ZBValidateOptions::default())
+    );
+    sweep!("validate_email_with_options", zb.validate_email_with_options("a@example.com", "", &post));
+    sweep!("batch_validate", zb.batch_validate(vec![("a@example.com".into(), String::new())]));
+    sweep!(
+        "batch_validate_with_options",
+        zb.batch_validate_with_options(vec![("a@example.com".into(), String::new())], &post)
+    );
+    sweep!("find_email", zb.find_email("example.com", "john", "", "doe"));
+    sweep!("find_email_v2", zb.find_email_v2().first_name("john").domain("example.com").call());
+    sweep!("domain_search", zb.domain_search("example.com"));
+    sweep!("domain_search_v2", zb.domain_search_v2().domain("example.com").call());
+
+    // Bulk validation and AI scoring files.
+    sweep!("bulk_validation_file_submit", zb.bulk_validation_file_submit(&file));
+    sweep!("bulk_validation_file_status_check", zb.bulk_validation_file_status_check("fid"));
+    sweep!("bulk_validation_result_fetch", zb.bulk_validation_result_fetch("fid"));
+    sweep!(
+        "bulk_validation_result_fetch_with_options",
+        zb.bulk_validation_result_fetch_with_options("fid", &getfile_options)
+    );
+    sweep!("bulk_validation_result_delete", zb.bulk_validation_result_delete("fid"));
+    sweep!("ai_scoring_file_submit", zb.ai_scoring_file_submit(&file));
+    sweep!("ai_scoring_file_status_check", zb.ai_scoring_file_status_check("fid"));
+    sweep!("ai_scoring_result_fetch", zb.ai_scoring_result_fetch("fid"));
+    sweep!(
+        "ai_scoring_result_fetch_with_options",
+        zb.ai_scoring_result_fetch_with_options("fid", &getfile_options)
+    );
+    sweep!("ai_scoring_result_delete", zb.ai_scoring_result_delete("fid"));
+
+    // Bulk email finder, domain search and list evaluator (multipart uploads).
+    sweep!(
         "send_email_finder_file",
-        zb.send_email_finder_file(1, &options, "leads.csv", &b"example.com,john\n"[..]),
+        zb.send_email_finder_file(1, &finder_options, "leads.csv", &b"example.com,john\n"[..])
     );
-    assert_refused_plaintext(
+    sweep!("email_finder_file_status", zb.email_finder_file_status("fid"));
+    sweep!("email_finder_result_fetch", zb.email_finder_result_fetch("fid"));
+    sweep!("email_finder_result_delete", zb.email_finder_result_delete("fid"));
+    sweep!(
         "send_domain_search_file",
-        zb.send_domain_search_file(1, Some(true), "domains.csv", &b"example.com\n"[..]),
+        zb.send_domain_search_file(1, Some(true), "domains.csv", &b"example.com\n"[..])
     );
-    assert_refused_plaintext(
+    sweep!("domain_search_file_status", zb.domain_search_file_status("fid"));
+    sweep!("domain_search_result_fetch", zb.domain_search_result_fetch("fid"));
+    sweep!("domain_search_result_delete", zb.domain_search_result_delete("fid"));
+    sweep!("send_evaluated_file", zb.send_evaluated_file("fid"));
+    sweep!(
         "send_list_evaluator_file",
-        zb.send_list_evaluator_file(1, "list.csv", &b"a@example.com\n"[..]),
+        zb.send_list_evaluator_file(1, "list.csv", &b"a@example.com\n"[..])
     );
-    assert_nothing_sent(&fake, "multipart uploads");
-}
+    sweep!("get_list_evaluator_result", zb.get_list_evaluator_result("fid"));
 
-#[test]
-fn plain_http_inbox_placement_is_refused_before_sending_the_bearer_key() {
-    let (port, fake) = start_fake();
-    let zb = plaintext_client(port, "plain-ipt-key");
+    // Filters.
+    sweep!("add_filter", zb.add_filter("allow", "email", "x@example.com"));
+    sweep!("list_filters", zb.list_filters(false));
+    sweep!("list_filters", zb.list_filters(true));
+    sweep!("delete_filter", zb.delete_filter("allow", "email", "x@example.com"));
 
-    assert_refused_plaintext("get_inbox_placement_providers", zb.get_inbox_placement_providers());
-    assert_refused_plaintext("get_inbox_placement_test_types", zb.get_inbox_placement_test_types());
-    assert_refused_plaintext(
+    // S3 and SFTP/FTP file jobs.
+    sweep!("list_s3_files", zb.list_s3_files(None, None));
+    sweep!("validate_s3_file", zb.validate_s3_file("f.csv", true, None, done));
+    sweep!("score_s3_file", zb.score_s3_file("f.csv", true, None, done));
+    sweep!("email_finder_s3_file", zb.email_finder_s3_file("f.csv", true, None, done));
+    sweep!("domain_search_s3_file", zb.domain_search_s3_file("f.csv", true, None, done));
+    sweep!("export_s3_file", zb.export_s3_file("fid", None));
+    sweep!("validate_sftp_file", zb.validate_sftp_file("f.csv", true, None, done));
+    sweep!("score_sftp_file", zb.score_sftp_file("f.csv", true, None, done));
+    sweep!("email_finder_sftp_file", zb.email_finder_sftp_file("f.csv", true, None, done));
+    sweep!("domain_search_sftp_file", zb.domain_search_sftp_file("f.csv", true, None, done));
+    sweep!("export_sftp_file", zb.export_sftp_file("fid", None));
+
+    // Inbox Placement Tester (Bearer key).
+    sweep!("get_inbox_placement_providers", zb.get_inbox_placement_providers());
+    sweep!("get_inbox_placement_test_types", zb.get_inbox_placement_test_types());
+    sweep!(
         "create_inbox_placement_test",
-        zb.create_inbox_placement_test("t", &CreateInboxPlacementTestOptions::default()),
+        zb.create_inbox_placement_test("t", &CreateInboxPlacementTestOptions::default())
     );
-    assert_refused_plaintext("get_inbox_placement_test", zb.get_inbox_placement_test("1"));
-    assert_refused_plaintext(
+    sweep!("get_inbox_placement_test", zb.get_inbox_placement_test("1"));
+    sweep!(
         "list_inbox_placement_tests",
-        zb.list_inbox_placement_tests(&ListInboxPlacementTestsOptions::default()),
+        zb.list_inbox_placement_tests(&ListInboxPlacementTestsOptions::default())
     );
-    assert_refused_plaintext("delete_inbox_placement_test", zb.delete_inbox_placement_test("1"));
-    assert_refused_plaintext("get_inbox_placement_webhook", zb.get_inbox_placement_webhook());
-    assert_refused_plaintext(
-        "set_inbox_placement_webhook",
-        zb.set_inbox_placement_webhook("https://example.com/hook"),
-    );
-    assert_nothing_sent(&fake, "inbox placement");
+    sweep!("delete_inbox_placement_test", zb.delete_inbox_placement_test("1"));
+    sweep!("get_inbox_placement_webhook", zb.get_inbox_placement_webhook());
+    sweep!("set_inbox_placement_webhook", zb.set_inbox_placement_webhook("https://example.com/hook"));
+
+    swept
 }
 
-/// Every other request path, so a new one that skips the check is caught here.
-#[test]
-fn plain_http_is_refused_on_every_other_request_path() {
-    let (port, fake) = start_fake();
-    let zb = plaintext_client(port, "plain-other-key");
-    let day = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+/// `pub fn`s of `ZeroBounce` that send no request.
+const NOT_REQUEST_METHODS: [&str; 2] = ["new", "with_base_url"];
 
-    assert_refused_plaintext("get_credits", zb.get_credits());
-    assert_refused_plaintext("get_api_usage", zb.get_api_usage(day, day));
-    assert_refused_plaintext("get_activity_data", zb.get_activity_data("a@example.com"));
-    assert_refused_plaintext("score_email", zb.score_email("a@example.com"));
-    assert_refused_plaintext("score_email_post", zb.score_email_post("a@example.com"));
-    assert_refused_plaintext("validate_email", zb.validate_email("a@example.com"));
-    assert_refused_plaintext(
-        "validate_email_with_options (POST)",
-        zb.validate_email_with_options(
-            "a@example.com",
-            "",
-            &ZBValidateOptions {
-                use_post: true,
-                ..Default::default()
-            },
-        ),
+/// The name of every `pub fn` in an `impl ZeroBounce` block under `src/`,
+/// read from the source, so a method added later is in this list without
+/// anyone remembering to add it.
+fn public_request_methods() -> BTreeSet<String> {
+    fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                found.push(path);
+            }
+        }
+    }
+    // Cargo sets CARGO_MANIFEST_DIR when it runs the test too; reading it at
+    // run time keeps the guard on the tree being tested if the target
+    // directory is shared between checkouts.
+    let root = std::env::var("CARGO_MANIFEST_DIR")
+        .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
+    let mut files = Vec::new();
+    rust_files(&std::path::Path::new(&root).join("src"), &mut files);
+    assert!(!files.is_empty(), "no Rust sources under {root}/src");
+
+    let mut names = BTreeSet::new();
+    for file in files {
+        let source = std::fs::read_to_string(&file).unwrap();
+        let mut in_impl = false;
+        for line in source.lines() {
+            // An inherent impl starts in column 0 and ends at the first "}"
+            // in column 0. A trait impl (`impl X for ZeroBounce`) is skipped.
+            let head = line.trim_end().trim_end_matches('{').trim_end();
+            if line.starts_with("impl") && head.ends_with(" ZeroBounce") && !head.contains(" for ") {
+                in_impl = true;
+                continue;
+            }
+            if in_impl && line.starts_with('}') {
+                in_impl = false;
+                continue;
+            }
+            let item = line.trim_start();
+            let signature = item
+                .strip_prefix("pub fn ")
+                .or_else(|| item.strip_prefix("pub async fn "));
+            if let (true, Some(signature)) = (in_impl, signature) {
+                let name: String = signature
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !NOT_REQUEST_METHODS.contains(&name.as_str()) {
+                    names.insert(name);
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Every public request method refuses a plain-http URL before anything is
+/// sent, and the guard fails when `src/` gains a request method the sweep
+/// does not call (or the sweep names one that no longer exists).
+#[test]
+fn plain_http_is_refused_on_every_public_request_method() {
+    let (port, fake) = start_fake();
+    let zb = plaintext_client(port, "plain-sweep-key");
+    let swept: BTreeSet<String> = sweep_every_request_method(&zb)
+        .into_iter()
+        .map(String::from)
+        .collect();
+    assert_nothing_sent(&fake, "plain-http sweep");
+
+    let defined = public_request_methods();
+    let missing: Vec<&String> = defined.difference(&swept).collect();
+    let unknown: Vec<&String> = swept.difference(&defined).collect();
+    assert!(
+        missing.is_empty(),
+        "public request methods the plain-http sweep does not call: {missing:?}"
     );
-    assert_refused_plaintext(
-        "batch_validate",
-        zb.batch_validate(vec![("a@example.com".into(), String::new())]),
+    assert!(
+        unknown.is_empty(),
+        "swept names with no `pub fn` in an `impl ZeroBounce` block: {unknown:?}"
     );
-    assert_refused_plaintext(
-        "find_email_v2",
-        zb.find_email_v2().first_name("john").domain("example.com").call(),
-    );
-    assert_refused_plaintext("domain_search_v2", zb.domain_search_v2().domain("example.com").call());
-    assert_refused_plaintext("bulk_validation_file_status_check", zb.bulk_validation_file_status_check("fid"));
-    assert_refused_plaintext("bulk_validation_result_delete", zb.bulk_validation_result_delete("fid"));
-    assert_refused_plaintext("ai_scoring_file_status_check", zb.ai_scoring_file_status_check("fid"));
-    assert_refused_plaintext("ai_scoring_result_delete", zb.ai_scoring_result_delete("fid"));
-    assert_refused_plaintext("email_finder_file_status", zb.email_finder_file_status("fid"));
-    assert_refused_plaintext("email_finder_result_delete", zb.email_finder_result_delete("fid"));
-    assert_refused_plaintext("domain_search_file_status", zb.domain_search_file_status("fid"));
-    assert_refused_plaintext("domain_search_result_delete", zb.domain_search_result_delete("fid"));
-    assert_refused_plaintext("send_evaluated_file", zb.send_evaluated_file("fid"));
-    assert_refused_plaintext("get_list_evaluator_result", zb.get_list_evaluator_result("fid"));
-    assert_refused_plaintext("add_filter", zb.add_filter("allow", "email", "x@example.com"));
-    assert_refused_plaintext("list_filters", zb.list_filters(false));
-    assert_refused_plaintext("delete_filter", zb.delete_filter("allow", "email", "x@example.com"));
-    assert_refused_plaintext("list_s3_files", zb.list_s3_files(None, None));
-    assert_refused_plaintext(
-        "validate_s3_file",
-        zb.validate_s3_file("f.csv", true, None, "https://example.com/done"),
-    );
-    assert_refused_plaintext("export_s3_file", zb.export_s3_file("fid", None));
-    assert_refused_plaintext(
-        "validate_sftp_file",
-        zb.validate_sftp_file("f.csv", true, None, "https://example.com/done"),
-    );
-    assert_refused_plaintext("export_sftp_file", zb.export_sftp_file("fid", None));
-    assert_nothing_sent(&fake, "other request paths");
 }
 
 /// The plaintext client itself works: the same requests reach the fake once
@@ -2069,5 +2142,80 @@ fn debug_output_redacts_the_key() {
         assert!(printed.contains("ZeroBounce"), "{printed}");
         assert!(printed.contains("***"), "{printed}");
         assert!(printed.contains("https://api.zerobounce.net/v2/"), "{printed}");
+    }
+}
+
+// -- multi-byte characters at the HTML sniff's cut --------------------------
+//
+// The HTML sniff looked at the first 2000 bytes with `&body[..2000]`, which
+// panicked when a multi-byte character straddled byte 2000. Every JSON
+// response and every getfile download goes through it.
+
+/// `prefix` ASCII bytes, so the two-byte 'é' after it spans bytes 1999-2000.
+fn straddling_the_cut(prefix: &str) -> String {
+    let mut text = String::from(prefix);
+    while text.len() < 1999 {
+        text.push('a');
+    }
+    text.push('é');
+    assert!(!text.is_char_boundary(2000));
+    text
+}
+
+#[test]
+fn a_validate_body_with_a_multi_byte_character_at_byte_2000_is_parsed() {
+    let mut server = mockito::Server::new();
+    let body = format!(
+        "{}\"}}",
+        straddling_the_cut(r#"{"address":"a@example.com","status":"valid","sub_status":"","city":""#)
+    );
+    let _mock = server
+        .mock("GET", mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(body)
+        .create();
+    let zb = ZeroBounce::with_base_url("multibyte-key", format!("{}/v2/", server.url())).unwrap();
+    let validation = zb.validate_email("a@example.com").unwrap();
+    assert!(validation.city.unwrap_or_default().ends_with('é'));
+}
+
+#[test]
+fn a_getfile_csv_with_a_multi_byte_character_at_byte_2000_is_returned() {
+    let mut server = mockito::Server::new();
+    let csv = format!("{}\n", straddling_the_cut("email,name\na@example.com,"));
+    let _mock = server
+        .mock("GET", mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/octet-stream")
+        .with_body(csv.clone())
+        .create();
+    let mut zb = ZeroBounce::with_base_url("multibyte-key", format!("{}/v2/", server.url())).unwrap();
+    zb.url_provider.bulk_url = format!("{}/v2/", server.url());
+    let ZBBulkResponse::Content(content) = zb.bulk_validation_result_fetch("fid").unwrap() else {
+        panic!("expected the file content");
+    };
+    assert_eq!(&content[..], csv.as_bytes());
+}
+
+// -- the key in transport errors -------------------------------------------
+
+/// A transport error quotes the request URL, which carries the key as
+/// `api_key`. The `From<reqwest::Error>` conversion redacts it; nothing
+/// tested that before.
+#[test]
+fn a_transport_error_redacts_the_key_in_its_url() {
+    // Port 1 on loopback refuses the connection, so the request fails in
+    // transport with its URL attached.
+    let zb = ZeroBounce::with_base_url("transport-secret-key", "http://127.0.0.1:1/v2/").unwrap();
+    let error = zb.get_credits().unwrap_err();
+    let ZBError::RequestError(inner) = &error else {
+        panic!("expected a transport error, got {error:?}");
+    };
+    let url = inner.url().expect("the error carries the request URL").as_str();
+    assert!(url.contains("api_key=REDACTED"), "{url}");
+    for printed in [error.to_string(), format!("{error:?}"), format!("{error:#?}")] {
+        assert!(!printed.contains("transport-secret-key"), "the key leaked: {printed}");
+        assert!(printed.contains("REDACTED"), "{printed}");
     }
 }

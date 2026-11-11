@@ -24,6 +24,8 @@ struct Recorded {
 struct Fake {
     records: Mutex<Vec<Recorded>>,
     reply: Mutex<Option<(u16, String, String)>>,
+    /// A Location header for the next reply only.
+    location: Mutex<Option<String>>,
 }
 
 impl Fake {
@@ -40,6 +42,11 @@ impl Fake {
     fn reply_with(&self, status: u16, content_type: &str, body: &str) {
         *self.reply.lock().unwrap() =
             Some((status, content_type.to_string(), body.to_string()));
+    }
+
+    fn redirect_to(&self, status: u16, location: &str) {
+        self.reply_with(status, "text/html", "");
+        *self.location.lock().unwrap() = Some(location.to_string());
     }
 }
 
@@ -130,8 +137,15 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                         "application/json".to_string(),
                         format!(r#"{{"ok":true,"echo_api_key":"{api_key}"}}"#),
                     ));
+                let location = fake
+                    .location
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .map(|target| format!("Location: {target}\r\n"))
+                    .unwrap_or_default();
                 let response = format!(
-                    "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\n{location}Content-Length: {}\r\nConnection: close\r\n\r\n",
                     payload.len()
                 );
                 let _ = stream.write_all(response.as_bytes());
@@ -148,6 +162,7 @@ fn start_fake() -> (u16, Arc<Fake>) {
     let fake = Arc::new(Fake {
         records: Mutex::new(Vec::new()),
         reply: Mutex::new(None),
+        location: Mutex::new(None),
     });
     let shared = fake.clone();
     thread::spawn(move || {
@@ -610,14 +625,22 @@ fn a_validation_error_list_becomes_one_short_message() {
     assert!(message.contains("ensure this value is <= 45"), "{message}");
 }
 
+/// The 302 carries a Location on the same fake, so a client that follows
+/// redirects would make a second request there and get a 200. Without the
+/// Location header the old version of this test passed whatever the redirect
+/// policy was.
 #[test]
 fn a_redirect_is_refused_rather_than_followed() {
     let (port, fake) = start_fake();
     let zb = client(port);
-    fake.reply_with(302, "text/html", "");
-    let error = zb.get_seeds().unwrap_err();
-    assert!(error.to_string().contains("redirect"), "{error}");
-    assert_eq!(error.status_code(), Some(302));
+    for status in [301, 302, 303, 307, 308] {
+        fake.redirect_to(status, &format!("http://127.0.0.1:{port}/elsewhere"));
+        let error = zb.get_seeds().unwrap_err();
+        assert!(error.to_string().contains("redirect"), "{status}: {error}");
+        assert_eq!(error.status_code(), Some(status));
+        let request = fake.only();
+        assert_eq!(request.path, "/api/v1/warmup/seeds", "{status}");
+    }
 }
 
 #[test]
@@ -672,6 +695,24 @@ fn an_html_error_page_is_not_pasted_into_the_message() {
     assert!(message.contains("HTML error page"), "{message}");
     assert!(message.len() < 500, "{message}");
     assert_eq!(error.status_code(), Some(403));
+}
+
+/// The HTML sniff sliced the body at byte 2000 and panicked when a
+/// multi-byte character straddled it.
+#[test]
+fn an_error_body_with_a_multi_byte_character_at_byte_2000_does_not_panic() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    let mut body = String::from("Fehler: ");
+    while body.len() < 1999 {
+        body.push('a');
+    }
+    body.push('é');
+    assert!(!body.is_char_boundary(2000));
+    fake.reply_with(500, "text/plain", &body);
+    let error = zb.get_seeds().unwrap_err();
+    assert_eq!(error.status_code(), Some(500));
+    assert!(error.to_string().contains("not valid JSON"), "{error}");
 }
 
 #[test]

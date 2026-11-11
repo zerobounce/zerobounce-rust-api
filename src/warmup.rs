@@ -6,7 +6,6 @@
 //! stays for the validation API key.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use chrono::NaiveDate;
 use serde_json::{Map, Value};
@@ -97,11 +96,7 @@ impl ZeroBounceWarmup {
         Ok(ZeroBounceWarmup {
             api_key: api_key.to_string(),
             root: format!("{}{BASE_PATH}", base_url.trim_end_matches('/')),
-            client: reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(120))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .unwrap_or_else(|_| reqwest::blocking::Client::default()),
+            client: crate::utility::http_client()?,
         })
     }
 
