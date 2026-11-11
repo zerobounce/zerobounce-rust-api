@@ -1,5 +1,5 @@
 use zero_bounce::ZBError;
-use zero_bounce::utility::mock_constants;
+use crate::mock_constants;
 use zero_bounce::utility::structures::bulk::ZBBulkResponse;
 use zero_bounce::utility::{CONTENT_TYPE_JSON, CONTENT_TYPE_STREAM};
 use zero_bounce::utility::{ENDPOINT_SCORING_SEND, ENDPOINT_SCORING_STATUS, ENDPOINT_SCORING_RESULT, ENDPOINT_SCORING_DELETE};
@@ -282,7 +282,7 @@ fn test_ai_scoring_delete_ok() {
     assert!(response.is_ok());
 
     let response_obj = response.unwrap();
-    assert_eq!(response_obj.success, true, "{:#?}", response_obj);
+    assert!(response_obj.success, "{:#?}", response_obj);
 }
 
 

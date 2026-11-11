@@ -686,3 +686,15 @@ fn a_malformed_body_does_not_leak_a_parser_dump() {
     let error: ZBError = zb.get_seeds().unwrap_err();
     assert!(error.to_string().contains("not valid JSON"), "{error}");
 }
+
+/// The derived Debug printed the key.
+#[test]
+fn debug_output_redacts_the_key() {
+    let zb = ZeroBounceWarmup::new("wk-debug-secret").unwrap();
+    for printed in [format!("{zb:?}"), format!("{zb:#?}")] {
+        assert!(!printed.contains("wk-debug-secret"), "{printed}");
+        assert!(printed.contains("ZeroBounceWarmup"), "{printed}");
+        assert!(printed.contains("***"), "{printed}");
+        assert!(printed.contains("https://warmup-api.zerobounce.net"), "{printed}");
+    }
+}

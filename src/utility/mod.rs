@@ -3,10 +3,34 @@ use std::io::Read;
 
 pub mod bulk_get_file;
 pub mod http_error;
-pub mod mock_constants;
+// Test fixtures. Not part of the public API; the integration tests include the
+// same file (tests/mod.rs).
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod mock_constants;
 pub mod structures;
 
 pub use bulk_get_file::{format_get_file_error_message, get_file_json_indicates_error};
+
+/// A key with surrounding whitespace or control characters would be quoted,
+/// unredacted, in the HTTP library's own error, so it is never sent.
+pub(crate) fn check_key_text(api_key: &str) -> ZBResult<()> {
+    if api_key != api_key.trim() || api_key.chars().any(|c| c.is_control()) {
+        return Err(ZBError::explicit(
+            "api_key has surrounding whitespace or control characters",
+        ));
+    }
+    Ok(())
+}
+
+/// What Debug output shows in place of an API key.
+pub(crate) fn redacted_key(api_key: &str) -> &'static str {
+    if api_key.is_empty() {
+        ""
+    } else {
+        "***"
+    }
+}
 
 pub const CONTENT_TYPE_JSON: &str = "application/json";
 pub const CONTENT_TYPE_STREAM: &str = "application/octet-stream";

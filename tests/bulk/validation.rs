@@ -1,5 +1,5 @@
 use zero_bounce::{ZBError, get_file_json_indicates_error};
-use zero_bounce::utility::mock_constants;
+use crate::mock_constants;
 use zero_bounce::utility::structures::bulk::{zb_download_type, ZBBulkResponse, ZBGetFileOptions};
 use zero_bounce::utility::{CONTENT_TYPE_JSON, CONTENT_TYPE_STREAM};
 use zero_bounce::utility::{ENDPOINT_FILE_SEND, ENDPOINT_FILE_STATUS, ENDPOINT_FILE_RESULT, ENDPOINT_FILE_DELETE};
@@ -199,9 +199,10 @@ fn test_bulk_validate_result_fetch_with_options() {
         .with_body(expected_content)
         .create();
 
-    let mut opts = ZBGetFileOptions::default();
-    opts.download_type = Some(zb_download_type::COMBINED.to_string());
-    opts.activity_data = Some(true);
+    let opts = ZBGetFileOptions {
+        download_type: Some(zb_download_type::COMBINED.to_string()),
+        activity_data: Some(true),
+    };
 
     let response = zb_instance.bulk_validation_result_fetch_with_options("mock_file_id", &opts);
     mock.assert();
@@ -312,7 +313,7 @@ fn test_bulk_validate_delete_ok() {
     assert!(response.is_ok());
 
     let response_obj = response.unwrap();
-    assert_eq!(response_obj.success, true, "{:#?}", response_obj);
+    assert!(response_obj.success, "{:#?}", response_obj);
 }
 
 

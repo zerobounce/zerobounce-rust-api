@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- A main-API key with surrounding whitespace or control characters is rejected before a request is sent, with `ZBError::ExplicitError("api_key has surrounding whitespace or control characters")`, as `ZeroBounceWarmup` already did. 3.0.0 sent it. Upgrading: trim a key read from a file or the environment (a trailing newline is the usual cause).
+- `zero_bounce::utility::mock_constants` is no longer public. It held the crate's own test fixtures and is now compiled only for its tests. Upgrading: copy the constants you used into your own tests.
+
+### Added
+
+- `Debug` for `ZeroBounce`, naming the type and every field, with the API key shown as `***`.
+
+### Changed
+
+- The crate is published with `license = "MIT"` instead of `license-file`, with `keywords` and `categories`, and ships only `src`, `README.md`, `LICENSE` and `CHANGELOG.md`. 3.0.0 also shipped the tests (the live suite included), examples, CI workflows, `Dockerfile`, `.env.example` and the contributor files.
+
+### Fixed
+
+- Requests went to `.../v2//<endpoint>`: the built-in base URLs end in `/v2/` and every endpoint starts with `/`. `ZBUrlProvider::url_of`, `bulk_url_of`, `list_evaluator_url_of` and `inbox_placement_url_of`, and the list evaluator calls, now drop trailing slashes from the base URL, whether it is built in (`ZeroBounce::new`, every `ApiBaseUrl`) or your own, so a request goes to `.../v2/validate`. The stored `base_url` and `url_provider` values are unchanged.
+- A 3xx answer to the main client is `ZBError::ApiError` with the 3xx status and the message `ZeroBounce returned a redirect, which this client does not follow.`, the same as `ZeroBounceWarmup`. 3.0.0 refused the redirect as well but reported it as `Empty response from ZeroBounce (HTTP 302)` or as an HTML error page.
+
+### Security
+
+- `ZeroBounceWarmup`'s `Debug` output shows the API key as `***`. 3.0.0 derived `Debug` and printed the key.
+
 ## [3.0.0] - 2026-11-11
 
 ### Breaking

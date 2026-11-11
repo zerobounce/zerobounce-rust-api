@@ -169,6 +169,9 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
     if key.starts_with("cf-json-") {
         return (403, "application/json", r#"{"type":"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1020/","title":"Error 1020: Access denied","status":403,"detail":"The request was blocked by a Cloudflare firewall rule configured by the site owner.","error_code":1020,"cloudflare_error":true,"what_you_should_do":"Do not retry. This block is intentional."}"#.to_string());
     }
+    if key.starts_with("redirect-") && !path.starts_with("/collect") {
+        return (302, "text/html", String::new());
+    }
     if key.starts_with("double-error-") {
         return (
             400,
@@ -395,8 +398,16 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                     let (status, content_type, payload) = answer(&recorded.path, &recorded.api_key);
                     fake.records.lock().unwrap().push(recorded);
                     thread::sleep(Duration::from_millis((std::process::id() as u64 % 7) + 1));
+                    // A 3xx points at /collect on the same fake, which answers
+                    // normally, so a client that follows redirects is caught on
+                    // the first hop rather than looping.
+                    let location = if (300..400).contains(&status) {
+                        "Location: /collect\r\n"
+                    } else {
+                        ""
+                    };
                     let response = format!(
-                        "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\n{location}Content-Length: {}\r\nConnection: close\r\n\r\n",
                         payload.len()
                     );
                     let _ = stream.write_all(response.as_bytes());
@@ -416,11 +427,9 @@ fn start_fake() -> (u16, Arc<Fake>) {
     });
     let shared = fake.clone();
     thread::spawn(move || {
-        for incoming in listener.incoming() {
-            if let Ok(stream) = incoming {
-                let shared = shared.clone();
-                thread::spawn(move || handle(stream, shared));
-            }
+        for stream in listener.incoming().flatten() {
+            let shared = shared.clone();
+            thread::spawn(move || handle(stream, shared));
         }
     });
     (port, fake)
@@ -489,9 +498,11 @@ fn credits_validate_and_batch_use_the_main_api() {
     );
     assert_eq!(request.api_key, "credits-key");
 
-    let mut options = ZBValidateOptions::default();
-    options.activity_data = Some(false);
-    options.verify_plus = Some(true);
+    let options = ZBValidateOptions {
+        activity_data: Some(false),
+        verify_plus: Some(true),
+        ..Default::default()
+    };
     let response = zb
         .validate_email_with_options("person@example.com", "", &options)
         .unwrap();
@@ -513,9 +524,11 @@ fn credits_validate_and_batch_use_the_main_api() {
     assert!(!request.fields.contains_key("timeout"));
     assert!(!request.fields.contains_key("ip_address"));
 
-    let mut posted = ZBValidateOptions::default();
-    posted.use_post = true;
-    posted.timeout = Some(15);
+    let posted = ZBValidateOptions {
+        use_post: true,
+        timeout: Some(15),
+        ..Default::default()
+    };
     zb.validate_email_with_options("person@example.com", "203.0.113.5", &posted)
         .unwrap();
     let request = only(&fake);
@@ -551,10 +564,12 @@ fn credits_validate_and_batch_use_the_main_api() {
         .contains("a@example.com"));
     assert!(!request.fields.contains_key("timeout"));
 
-    let mut batch_options = ZBValidateOptions::default();
-    batch_options.timeout = Some(30);
-    batch_options.activity_data = Some(false);
-    batch_options.verify_plus = Some(true);
+    let batch_options = ZBValidateOptions {
+        timeout: Some(30),
+        activity_data: Some(false),
+        verify_plus: Some(true),
+        ..Default::default()
+    };
     zb.batch_validate_with_options(
         vec![("a@example.com".into(), String::new())],
         &batch_options,
@@ -1234,15 +1249,19 @@ fn invalid_arguments_are_rejected_before_a_request() {
     assert_eq!(fake.len(), 0);
 
     let zb = client(port, "keyed");
-    let mut bad = ZBValidateOptions::default();
-    bad.timeout = Some(2);
+    let bad = ZBValidateOptions {
+        timeout: Some(2),
+        ..Default::default()
+    };
     assert!(zb
         .validate_email_with_options("a@example.com", "", &bad)
         .unwrap_err()
         .to_string()
         .contains("timeout"));
-    let mut batch = ZBValidateOptions::default();
-    batch.timeout = Some(9);
+    let batch = ZBValidateOptions {
+        timeout: Some(9),
+        ..Default::default()
+    };
     assert!(zb
         .batch_validate_with_options(vec![("a@example.com".into(), String::new())], &batch)
         .unwrap_err()
@@ -1343,7 +1362,6 @@ fn concurrent_clients_do_not_share_keys() {
     let (port, fake) = start_fake();
     let mut handles = Vec::new();
     for i in 0..12 {
-        let port = port;
         handles.push(thread::spawn(move || {
             let key = format!("conc-{i}");
             let response = client(port, &key)
@@ -1706,12 +1724,13 @@ fn assert_refused_plaintext<T: std::fmt::Debug>(name: &str, result: Result<T, ZB
 /// The fake must have seen nothing: no request, so no key on the wire.
 fn assert_nothing_sent(fake: &Fake, name: &str) {
     let leaked = fake.take();
+    // The message says whether a key was on the wire, never what it was.
     assert!(
         leaked.is_empty(),
-        "{name}: {} request(s) reached the server over plain http, the first to {} carrying key {:?}",
+        "{name}: {} request(s) reached the server over plain http, the first to {} (key sent: {})",
         leaked.len(),
         leaked[0].path,
-        leaked[0].api_key
+        !leaked[0].api_key.is_empty()
     );
 }
 
@@ -1927,4 +1946,128 @@ fn errors_without_a_response_have_no_status() {
     assert_eq!(error.status_code(), None);
     let error = ZeroBounce::with_base_url("key", "http://api.zerobounce.net/v2/").err().unwrap();
     assert_eq!(error.status_code(), None);
+}
+
+/// The built-in base URLs end in `/v2/` and every endpoint starts with `/`, so
+/// requests went to `/v2//validate`. Built-in and custom URLs alike are now
+/// joined with one slash.
+#[test]
+fn base_urls_are_joined_with_one_slash() {
+    use zero_bounce::utility::{ENDPOINT_FILE_SEND, ENDPOINT_VALIDATE};
+    let cases: Vec<(ZeroBounce, &str)> = vec![
+        (ZeroBounce::new("k"), "https://api.zerobounce.net/v2/validate"),
+        (ZeroBounce::with_base_url("k", ApiBaseUrl::Default).unwrap(), "https://api.zerobounce.net/v2/validate"),
+        (ZeroBounce::with_base_url("k", ApiBaseUrl::USA).unwrap(), "https://api-us.zerobounce.net/v2/validate"),
+        (ZeroBounce::with_base_url("k", ApiBaseUrl::EU).unwrap(), "https://api-eu.zerobounce.net/v2/validate"),
+        (ZeroBounce::with_base_url("k", "https://custom.example/v2/").unwrap(), "https://custom.example/v2/validate"),
+        (ZeroBounce::with_base_url("k", "https://custom.example/v2").unwrap(), "https://custom.example/v2/validate"),
+        (ZeroBounce::with_base_url("k", "https://custom.example/v2//").unwrap(), "https://custom.example/v2/validate"),
+    ];
+    for (zb, want) in cases {
+        assert_eq!(zb.url_provider.url_of(ENDPOINT_VALIDATE), want);
+    }
+
+    let mut zb = ZeroBounce::new("k");
+    assert_eq!(zb.url_provider.bulk_url_of(ENDPOINT_FILE_SEND), "https://bulkapi.zerobounce.net/v2/sendfile");
+    assert_eq!(zb.url_provider.inbox_placement_url_of("/providers"), "https://bulkapi.zerobounce.net/api/ipt/providers");
+    zb.url_provider.url = "https://custom.example/v2/".into();
+    zb.url_provider.bulk_url = "https://bulk.example/v2/".into();
+    zb.url_provider.list_evaluator_url = "https://bulk.example/v2/listevaluator/".into();
+    zb.url_provider.inbox_placement_url = "https://bulk.example/api/ipt/".into();
+    assert_eq!(zb.url_provider.url_of(ENDPOINT_VALIDATE), "https://custom.example/v2/validate");
+    assert_eq!(zb.url_provider.bulk_url_of(ENDPOINT_FILE_SEND), "https://bulk.example/v2/sendfile");
+    assert_eq!(zb.url_provider.list_evaluator_url_of("/fid/"), "https://bulk.example/v2/listevaluator/fid/");
+    assert_eq!(zb.url_provider.inbox_placement_url_of("/providers"), "https://bulk.example/api/ipt/providers");
+}
+
+/// The same on the wire, for each kind of base URL a request is built from.
+#[test]
+fn requests_reach_paths_without_a_double_slash() {
+    let (port, fake) = start_fake();
+    let mut zb = ZeroBounce::with_base_url("slash-key", format!("http://127.0.0.1:{port}/api/v2/")).unwrap();
+    zb.url_provider.bulk_url = format!("http://127.0.0.1:{port}/bulk/v2/");
+    zb.url_provider.list_evaluator_url = format!("http://127.0.0.1:{port}/bulk/v2/listevaluator/");
+    zb.url_provider.inbox_placement_url = format!("http://127.0.0.1:{port}/api/ipt/");
+
+    zb.get_credits().unwrap();
+    assert_eq!(only(&fake).path, "/api/v2/getcredits");
+    zb.validate_email("a@example.com").unwrap();
+    assert_eq!(only(&fake).path, "/api/v2/validate");
+    zb.bulk_validation_file_status_check("fid").unwrap();
+    assert_eq!(only(&fake).path, "/bulk/v2/filestatus");
+    zb.get_list_evaluator_result("fid").unwrap();
+    assert_eq!(only(&fake).path, "/bulk/v2/listevaluator/fid/");
+    zb.get_inbox_placement_providers().unwrap();
+    assert!(!only(&fake).path.contains("//"));
+}
+
+/// The main client must not follow a redirect: the key would go with it. Only
+/// the Warmup client had a test, so `Policy::limited(10)` here passed the suite.
+/// This uses the client `with_base_url` builds, not the test helper's.
+#[test]
+fn the_main_client_refuses_redirects() {
+    let (port, fake) = start_fake();
+    let mut zb = ZeroBounce::with_base_url("redirect-key", format!("http://127.0.0.1:{port}/api/v2/")).unwrap();
+    zb.url_provider.bulk_url = format!("http://127.0.0.1:{port}/bulk/v2");
+    zb.url_provider.inbox_placement_url = format!("http://127.0.0.1:{port}/api/ipt");
+    type Call<'a> = Box<dyn Fn() -> Result<(), ZBError> + 'a>;
+    let calls: Vec<(&str, Call)> = vec![
+        ("get_credits", Box::new(|| zb.get_credits().map(|_| ()))),
+        ("validate_email", Box::new(|| zb.validate_email("a@example.com").map(|_| ()))),
+        ("batch_validate", Box::new(|| zb.batch_validate(vec![("a@example.com".into(), String::new())]).map(|_| ()))),
+        ("bulk_validation_file_status_check", Box::new(|| zb.bulk_validation_file_status_check("fid").map(|_| ()))),
+        ("bulk_validation_result_fetch", Box::new(|| zb.bulk_validation_result_fetch("fid").map(|_| ()))),
+        ("get_inbox_placement_providers", Box::new(|| zb.get_inbox_placement_providers().map(|_| ()))),
+    ];
+    for (name, call) in calls {
+        let error = call().expect_err(name);
+        assert_eq!(error.status_code(), Some(302), "{name}: {error:?}");
+        assert_eq!(
+            error.to_string(),
+            "ZeroBounce returned a redirect, which this client does not follow.",
+            "{name}"
+        );
+        let seen = fake.take();
+        assert_eq!(seen.len(), 1, "{name}: the redirect was followed to {:?}", seen.last().map(|r| &r.path));
+    }
+}
+
+/// The Warmup client already refused such a key; the main client sent it.
+#[test]
+fn a_key_with_whitespace_or_control_characters_is_rejected_before_a_request() {
+    let (port, fake) = start_fake();
+    for key in [" key", "key ", "\tkey", "key\n", "ke\u{0}y", "ke\u{7f}y", "ke\ry"] {
+        let zb = client(port, key);
+        let results: Vec<(&str, Result<(), ZBError>)> = vec![
+            ("get_credits", zb.get_credits().map(|_| ())),
+            ("validate_email", zb.validate_email("a@example.com").map(|_| ())),
+            ("batch_validate", zb.batch_validate(vec![("a@example.com".into(), String::new())]).map(|_| ())),
+            ("bulk_validation_file_status_check", zb.bulk_validation_file_status_check("fid").map(|_| ())),
+            ("get_inbox_placement_providers", zb.get_inbox_placement_providers().map(|_| ())),
+        ];
+        for (name, result) in results {
+            match result {
+                Err(ZBError::ExplicitError(message)) => assert!(
+                    message.contains("surrounding whitespace or control characters"),
+                    "{name}: {message}"
+                ),
+                other => panic!("{name}: expected the key to be rejected, got {other:?}"),
+            }
+        }
+        assert_eq!(fake.len(), 0, "a request was sent");
+    }
+    client(port, "plain-key").get_credits().unwrap();
+    assert_eq!(fake.take().len(), 1);
+}
+
+/// Debug output names the type and its fields, with the key redacted.
+#[test]
+fn debug_output_redacts_the_key() {
+    let zb = ZeroBounce::new("sk-debug-secret");
+    for printed in [format!("{zb:?}"), format!("{zb:#?}")] {
+        assert!(!printed.contains("sk-debug-secret"), "{printed}");
+        assert!(printed.contains("ZeroBounce"), "{printed}");
+        assert!(printed.contains("***"), "{printed}");
+        assert!(printed.contains("https://api.zerobounce.net/v2/"), "{printed}");
+    }
 }

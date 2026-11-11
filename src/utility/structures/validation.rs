@@ -123,7 +123,7 @@ mod test {
         assert_eq!(validation.sub_status, "mailbox_not_found".to_string());
         assert_eq!(validation.did_you_mean, None);
         assert_eq!(validation.smtp_provider, Some("example".to_string()));
-        assert_eq!(validation.free_email, false);
+        assert!(!validation.free_email);
 
         let expected_date = NaiveDateTime::new(
             chrono::NaiveDate::from_ymd_opt(2023, 3, 23).unwrap(),
@@ -143,7 +143,7 @@ mod test {
         assert_eq!(validation.did_you_mean, None);
         assert_eq!(validation.smtp_provider, Some("example".to_string()));
         assert_eq!(validation.catchall_domain, Some(false));
-        assert_eq!(validation.free_email, false);
+        assert!(!validation.free_email);
 
         let expected_date = NaiveDateTime::new(
             chrono::NaiveDate::from_ymd_opt(2023, 3, 23).unwrap(),

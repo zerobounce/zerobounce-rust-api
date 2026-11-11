@@ -38,18 +38,30 @@ pub struct ZBUrlProvider {
     pub inbox_placement_url: String,
 }
 
+/// `base` and `endpoint` joined by exactly one slash. The built-in base URLs
+/// end in `/v2/` and every endpoint starts with `/`, which used to give
+/// `/v2//validate`; trailing slashes on any base URL are now dropped.
+fn join_url(base: &str, endpoint: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if endpoint.is_empty() || endpoint.starts_with('/') {
+        format!("{base}{endpoint}")
+    } else {
+        format!("{base}/{endpoint}")
+    }
+}
+
 impl ZBUrlProvider {
     pub fn url_of(&self, endpoint: &str) -> String {
-        self.url.to_owned() + endpoint
+        join_url(&self.url, endpoint)
     }
     pub fn bulk_url_of(&self, endpoint: &str) -> String {
-        self.bulk_url.to_owned() + endpoint
+        join_url(&self.bulk_url, endpoint)
     }
     pub fn list_evaluator_url_of(&self, endpoint: &str) -> String {
-        self.list_evaluator_url.to_owned() + endpoint
+        join_url(&self.list_evaluator_url, endpoint)
     }
     pub fn inbox_placement_url_of(&self, endpoint: &str) -> String {
-        self.inbox_placement_url.to_owned() + endpoint
+        join_url(&self.inbox_placement_url, endpoint)
     }
 }
 
@@ -70,6 +82,18 @@ pub struct ZeroBounce {
     pub base_url: String,
     pub client: reqwest::blocking::Client,
     pub url_provider: ZBUrlProvider,
+}
+
+/// Names the type and every field, with the API key shown as `***`.
+impl std::fmt::Debug for ZeroBounce {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ZeroBounce")
+            .field("api_key", &utility::redacted_key(&self.api_key))
+            .field("base_url", &self.base_url)
+            .field("client", &self.client)
+            .field("url_provider", &self.url_provider)
+            .finish()
+    }
 }
 
 // More method implementations of this class can be found throughout
@@ -152,7 +176,7 @@ impl ZeroBounce {
         if self.api_key.trim().is_empty() {
             return Err(ZBError::explicit("api_key is required"));
         }
-        Ok(())
+        utility::check_key_text(&self.api_key)
     }
 
     fn read_api_response(&self, response: reqwest::blocking::Response) -> ZBResult<String> {

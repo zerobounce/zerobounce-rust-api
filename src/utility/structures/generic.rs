@@ -188,7 +188,7 @@ mod tests {
         assert!(activity_data_res.is_ok(), "error: {}", activity_data_res.unwrap_err());
 
         let activity_data = activity_data_res.unwrap();
-        assert_eq!(activity_data.found, false);
+        assert!(!activity_data.found);
         assert_eq!(activity_data.active_in_days, None);
     }
 
@@ -198,7 +198,7 @@ mod tests {
         assert!(activity_data_res.is_ok());
 
         let activity_data = activity_data_res.unwrap();
-        assert_eq!(activity_data.found, true);
+        assert!(activity_data.found);
         assert_eq!(activity_data.active_in_days, Some(180));
     }
 

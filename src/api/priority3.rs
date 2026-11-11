@@ -296,7 +296,7 @@ impl ZeroBounce {
         }
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
-        let url = format!("{}/", self.url_provider.list_evaluator_url);
+        let url = self.url_provider.list_evaluator_url_of("/");
         post_bulk_root_multipart(
             self,
             url,
@@ -313,11 +313,10 @@ impl ZeroBounce {
         if file_id.trim().is_empty() {
             return Err(ZBError::explicit("empty parameter: file_id"));
         }
-        let url = format!(
-            "{}/{}/",
-            self.url_provider.list_evaluator_url,
+        let url = self.url_provider.list_evaluator_url_of(&format!(
+            "/{}/",
             crate::utility::encode_path_segment(file_id)
-        );
+        ));
         let body = self.generic_get_request(url, HashMap::new())?;
         crate::utility::http_error::parse_json_body(&body)
     }

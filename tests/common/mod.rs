@@ -6,7 +6,7 @@ pub(crate) const MOCK_API_KEY: &str = "mock_api_key";
 pub(crate) const INVALID_URL: &str = "https://255.255.255.255";
 pub(crate) const SANDBOX_IP: &str = "99.110.204.1";
 
-pub(crate) fn instantiate<'s>() -> (ServerGuard, ZeroBounce) {
+pub(crate) fn instantiate() -> (ServerGuard, ZeroBounce) {
 
     let mock_server = Server::new();
     let mock_url: String = mock_server.url().to_owned();

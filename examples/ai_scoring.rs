@@ -57,7 +57,7 @@ fn main() -> ZBResult<()> {
 
         file_status = zb_instance.ai_scoring_file_status_check(file_id)?;
     }
-    println!("");
+    println!();
 
     // fetch the result of the bulk validation
     let bulk_result = zb_instance.ai_scoring_result_fetch(file_id)?;

@@ -1,4 +1,5 @@
-use zero_bounce::utility::{ENDPOINT_ACTIVITY_DATA, CONTENT_TYPE_JSON, ZBError, mock_constants};
+use zero_bounce::utility::{ENDPOINT_ACTIVITY_DATA, CONTENT_TYPE_JSON, ZBError};
+use crate::mock_constants;
 
 use crate::common::EMAIL;
 use crate::common::{instantiate, invalid_url_zb_instance, endpoint_matcher};
@@ -71,7 +72,7 @@ fn test_activity_data_ok_inactive() {
     mock.assert();
 
     let a_data = activity_data.unwrap();
-    assert_eq!(a_data.found, false);
+    assert!(!a_data.found);
     assert_eq!(a_data.active_in_days, None);
 }
 
@@ -92,6 +93,6 @@ fn test_activity_data_ok_active() {
     mock.assert();
 
     let a_data = activity_data.unwrap();
-    assert_eq!(a_data.found, true);
+    assert!(a_data.found);
     assert_eq!(a_data.active_in_days, Some(180));
 }
