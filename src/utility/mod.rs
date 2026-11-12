@@ -32,13 +32,12 @@ pub(crate) fn redacted_key(api_key: &str) -> &'static str {
     }
 }
 
-/// Every form a message can carry `secret` in: as sent, percent-encoded the
-/// way a query or form encodes it and strictly (path escaping), and
-/// JSON-escaped, with and without `\/` for `/`.
-fn secret_forms(secret: &str) -> Vec<String> {
+/// `text` percent-encoded the way a query or form encodes it (space as `+`)
+/// and strictly (path escaping, space as `%20`).
+fn url_forms(text: &str) -> [String; 2] {
     let mut query = String::new();
     let mut strict = String::new();
-    for byte in secret.bytes() {
+    for byte in text.bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' => {
                 query.push(byte as char);
@@ -58,6 +57,16 @@ fn secret_forms(secret: &str) -> Vec<String> {
             }
         }
     }
+    [query, strict]
+}
+
+/// Every form a message can carry `secret` in, longest first: as sent,
+/// percent-encoded the way a query or form encodes it and strictly (path
+/// escaping), JSON-escaped, with and without `\/` for `/`, and each JSON form
+/// percent-encoded both ways, which is how a server echoes a URL-encoded JSON
+/// request body. Longest first, so a shorter form is never masked inside a
+/// longer one and part of the longer one left behind.
+fn secret_forms(secret: &str) -> Vec<String> {
     let quoted = serde_json::to_string(secret).unwrap_or_default();
     let json = quoted
         .strip_prefix('"')
@@ -65,7 +74,14 @@ fn secret_forms(secret: &str) -> Vec<String> {
         .unwrap_or(secret)
         .to_string();
     let json_slash = json.replace('/', "\\/");
-    vec![secret.to_string(), query, strict, json, json_slash]
+    let mut forms = vec![secret.to_string()];
+    forms.extend(url_forms(secret));
+    for escaped in [json, json_slash] {
+        forms.extend(url_forms(&escaped));
+        forms.push(escaped);
+    }
+    forms.sort_by_key(|form| std::cmp::Reverse(form.len()));
+    forms
 }
 
 /// Mask every `api_key=` value in a message, whichever key it holds.
@@ -168,6 +184,41 @@ mod redaction_tests {
         );
         assert_eq!(redact_secrets("API_KEY=x", &[]), "API_KEY=***");
         assert_eq!(redact_secrets("no secret here", &["", "absent"]), "no secret here");
+    }
+
+    /// Each form on its own, spelled out, for a secret holding every
+    /// character the encodings treat differently, so dropping any one form
+    /// fails: as sent, query and strict percent-encoding, JSON-escaped with
+    /// and without `\/`, and the query and strict encoding of each JSON form
+    /// (a server echoing a URL-encoded JSON request body). serde_json leaves
+    /// `<`, `>`, `&` and `'` as they are, so there is no HTML-escaped form.
+    #[test]
+    fn every_encoding_of_a_secret_is_masked_on_its_own() {
+        let secret = r#"a b"c/d+e%f&g=h<i>j'k\l"#;
+        let forms = [
+            ("raw", r#"a b"c/d+e%f&g=h<i>j'k\l"#),
+            ("query", "a+b%22c%2Fd%2Be%25f%26g%3Dh%3Ci%3Ej%27k%5Cl"),
+            ("strict", "a%20b%22c%2Fd%2Be%25f%26g%3Dh%3Ci%3Ej%27k%5Cl"),
+            ("json", r#"a b\"c/d+e%f&g=h<i>j'k\\l"#),
+            ("json \\/", r#"a b\"c\/d+e%f&g=h<i>j'k\\l"#),
+            ("query json", "a+b%5C%22c%2Fd%2Be%25f%26g%3Dh%3Ci%3Ej%27k%5C%5Cl"),
+            ("strict json", "a%20b%5C%22c%2Fd%2Be%25f%26g%3Dh%3Ci%3Ej%27k%5C%5Cl"),
+            ("query json \\/", "a+b%5C%22c%5C%2Fd%2Be%25f%26g%3Dh%3Ci%3Ej%27k%5C%5Cl"),
+            ("strict json \\/", "a%20b%5C%22c%5C%2Fd%2Be%25f%26g%3Dh%3Ci%3Ej%27k%5C%5Cl"),
+        ];
+        for (name, text) in forms {
+            assert_eq!(
+                redact_secrets(&format!("echo [{text}] end"), &[secret]),
+                "echo [***] end",
+                "the {name} form was left"
+            );
+        }
+        // The raw form of `"k` sits inside its JSON form `\"k`: masking the
+        // shorter form first would leave a stray backslash behind.
+        assert_eq!(
+            redact_secrets(r#"{"error":"bad key \"k"}"#, &[r#""k"#]),
+            r#"{"error":"bad key ***"}"#
+        );
     }
 }
 

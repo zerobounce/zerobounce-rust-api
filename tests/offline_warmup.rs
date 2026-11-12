@@ -140,7 +140,7 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                     body,
                 });
 
-                let echoed = echo_answer(path, &api_key);
+                let echoed = echo_answer(path, &api_key).or_else(|| contradiction_answer(&api_key));
                 let (status, content_type, payload) =
                     fake.reply.lock().unwrap().take().or(echoed).unwrap_or_else(|| {
                         if path.ends_with("/download") {
@@ -229,6 +229,18 @@ fn echo_answer(path: &str, key: &str) -> Option<(u16, String, String)> {
         return Some((400, json, format!(r#"{{"error":"Invalid API key {inner}"}}"#)));
     }
     None
+}
+
+/// For these keys, a 200 whose content type contradicts its body: text/html
+/// over JSON or over a CSV, and a JSON content type over a CSV.
+fn contradiction_answer(key: &str) -> Option<(u16, String, String)> {
+    let csv = "seed,provider\na@b.com,gmail\n".to_string();
+    match key {
+        "html-ct-json-key" => Some((200, "text/html; charset=UTF-8".to_string(), r#"{"a":1}"#.to_string())),
+        "html-ct-csv-key" => Some((200, "Text/HTML".to_string(), csv)),
+        "csv-as-json-key" => Some((200, "application/json; charset=utf-8".to_string(), csv)),
+        _ => None,
+    }
 }
 
 fn start_fake() -> (u16, Arc<Fake>) {
@@ -1205,4 +1217,46 @@ fn a_body_cut_short_is_an_error_on_every_warmup_method() {
     let unknown: Vec<&String> = swept.difference(&defined).collect();
     assert!(missing.is_empty(), "Warmup methods the sweep does not call: {missing:?}");
     assert!(unknown.is_empty(), "swept names with no `pub fn` in src/warmup.rs: {unknown:?}");
+}
+
+/// The content type alone decides when it contradicts the body: a text/html
+/// 200 is an HTML page even when its body is JSON (every Warmup method) or a
+/// CSV (the CSV downloads), and a JSON content type is not a CSV even when the
+/// body is one. Each case is caught only by the content-type half of its
+/// guard, so removing that half fails here. The JSON calls accepted a
+/// text/html body that parsed as JSON.
+#[test]
+fn every_warmup_method_rejects_a_content_type_that_contradicts_the_body() {
+    let (port, fake) = start_fake();
+    // The CSV downloads: the methods that return the fake's default CSV.
+    let mut downloads = BTreeSet::new();
+    sweep_every_warmup_method(&client(port), &mut |name, result| {
+        if result.is_ok_and(|value| value.contains("seed,provider")) {
+            downloads.insert(name);
+        }
+    });
+    assert_eq!(downloads.len(), 2, "found {downloads:?}");
+    for (key, downloads_only) in [
+        ("html-ct-json-key", false),
+        ("html-ct-csv-key", true),
+        ("csv-as-json-key", true),
+    ] {
+        let zb = ZeroBounceWarmup::with_base_url(key, &format!("http://127.0.0.1:{port}")).unwrap();
+        let mut wrong = Vec::new();
+        sweep_every_warmup_method(&zb, &mut |name, result| {
+            if downloads_only && !downloads.contains(name) {
+                return;
+            }
+            match result {
+                Err(error) if error.status_code() == Some(200) => {
+                    if !downloads_only && !error.to_string().contains("HTML") {
+                        wrong.push(format!("{name}: {error}"));
+                    }
+                }
+                other => wrong.push(format!("{name}: {other:?}")),
+            }
+        });
+        fake.take();
+        assert!(wrong.is_empty(), "{key}: {wrong:#?}");
+    }
 }

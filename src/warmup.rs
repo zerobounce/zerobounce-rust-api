@@ -245,6 +245,14 @@ impl ZeroBounceWarmup {
         if status == 204 || text.trim().is_empty() {
             return Ok(None);
         }
+        // A text/html response is a page (a proxy or a challenge), not the
+        // API's answer, even when its body happens to parse as JSON.
+        if crate::utility::http_error::content_type_is_html(&content_type) {
+            return Err(ZBError::api(
+                status,
+                self.redact(&message_from_body(status, &content_type, &text), secrets),
+            ));
+        }
         match serde_json::from_str::<Value>(&text) {
             Ok(value) => Ok(Some(value)),
             Err(_) => Err(ZBError::api(

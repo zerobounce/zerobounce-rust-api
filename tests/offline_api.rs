@@ -262,6 +262,14 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
     if key.starts_with("csv-as-json-") {
         return (200, "application/json", "email,status\na@example.com,valid\n".to_string());
     }
+    // A text/html content type over a body that is not HTML: only the content
+    // type says it is a page.
+    if key.starts_with("html-ct-json-") {
+        return (200, "text/html; charset=UTF-8", r#"{"a":1}"#.to_string());
+    }
+    if key.starts_with("html-ct-csv-") {
+        return (200, "Text/HTML", "email,status\na@example.com,valid\n".to_string());
+    }
     // "empty-status-401-…": that status with an empty body.
     if let Some(status) = key
         .strip_prefix("empty-status-")
@@ -2357,6 +2365,21 @@ fn requests_reach_paths_without_a_double_slash() {
     assert!(!only(&fake).path.contains("//"));
 }
 
+/// The S3 and SFTP/FTP jobs post to the bulk host's root, not under `/v2`:
+/// every trailing slash of the bulk base URL is stripped before `/v2` is.
+#[test]
+fn bulk_root_jobs_strip_every_trailing_slash_before_v2() {
+    let (port, fake) = start_fake();
+    for suffix in ["/bulk/v2", "/bulk/v2/", "/bulk/v2//"] {
+        let mut zb = client(port, "bulk-root-key");
+        zb.url_provider.bulk_url = format!("http://127.0.0.1:{port}{suffix}");
+        zb.validate_s3_file("inbox.csv", true, None, "https://example.com/done").unwrap();
+        assert_eq!(only(&fake).path, "/bulk/validateS3file", "bulk URL ending {suffix}");
+        zb.list_s3_files(None, None).unwrap();
+        assert_eq!(only(&fake).path, "/bulk/listS3files", "bulk URL ending {suffix}");
+    }
+}
+
 /// The main client must not follow a redirect: the key would go with it. Only
 /// the Warmup client had a test, so `Policy::limited(10)` here passed the suite.
 /// This uses the client `with_base_url` builds, not the test helper's.
@@ -2560,6 +2583,36 @@ fn every_download_rejects_a_json_content_type() {
         if downloads.contains(name) {
             assert_status_200(name, &result);
         }
+    }
+}
+
+/// The content type alone decides when it contradicts the body: a text/html
+/// 200 is an HTML page even when its body is JSON (every call) or a CSV
+/// (every download), and a JSON content type is not a result file even when
+/// the body is a CSV. Each case is caught only by the content-type half of
+/// its guard, so removing that half fails here.
+#[test]
+fn every_call_rejects_a_content_type_that_contradicts_the_body() {
+    let (port, _fake) = start_fake();
+    let downloads = download_methods(port);
+    for (key, downloads_only) in [
+        ("html-ct-json-key", false),
+        ("html-ct-csv-key", true),
+        ("csv-as-json-key", true),
+    ] {
+        let mut checked = 0;
+        for (name, result) in sweep_with_key(port, key) {
+            if downloads_only && !downloads.contains(name) {
+                continue;
+            }
+            checked += 1;
+            assert_status_200(&format!("{key} {name}"), &result);
+            if !downloads_only {
+                let text = result.unwrap_err().to_string();
+                assert!(text.contains("HTML"), "{key} {name}: {text}");
+            }
+        }
+        assert!(checked >= downloads.len(), "{key}: only {checked} calls checked");
     }
 }
 
