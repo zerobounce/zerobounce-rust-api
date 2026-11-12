@@ -193,29 +193,36 @@ pub fn ensure_json_api_body(status: u16, content_type: &str, body: &str) -> ZBRe
             message_from_body(status, content_type, body),
         ));
     }
+    // JSON that does not parse is not an API answer either. (A body that
+    // parses but does not fit the response type is the SDK's parse error.)
+    let parsed = match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            return Err(ZBError::api(
+                status,
+                "ZeroBounce returned a response that is not valid JSON.",
+            ))
+        }
+    };
     // LIVE: {"success": false} on an HTTP 200 is a failure, not a result. The
     // API answers an unknown bulk file id that way, with a 200.
-    if trimmed.starts_with('{') {
-        if let Ok(serde_json::Value::Object(object)) =
-            serde_json::from_str::<serde_json::Value>(trimmed)
-        {
-            if object.get("success").is_some_and(is_falsy_api_success) {
-                return Err(ZBError::api(
-                    status,
-                    message_from_body(status, content_type, body),
-                ));
-            }
-            // LIVE: an invalid or drained key answers with an HTTP 200 and a
-            // body that is only {"error": "Invalid API key"} -- no "success"
-            // field to gate on. Without this the body reached serde, which
-            // failed on the unexpected shape and reported a parse error,
-            // hiding the real cause.
-            if !error_only_body(&object).is_empty() {
-                return Err(ZBError::api(
-                    status,
-                    message_from_body(status, content_type, body),
-                ));
-            }
+    if let serde_json::Value::Object(object) = parsed {
+        if object.get("success").is_some_and(is_falsy_api_success) {
+            return Err(ZBError::api(
+                status,
+                message_from_body(status, content_type, body),
+            ));
+        }
+        // LIVE: an invalid or drained key answers with an HTTP 200 and a
+        // body that is only {"error": "Invalid API key"} -- no "success"
+        // field to gate on. Without this the body reached serde, which
+        // failed on the unexpected shape and reported a parse error,
+        // hiding the real cause.
+        if !error_only_body(&object).is_empty() {
+            return Err(ZBError::api(
+                status,
+                message_from_body(status, content_type, body),
+            ));
         }
     }
     Ok(())

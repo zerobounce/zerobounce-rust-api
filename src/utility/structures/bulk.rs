@@ -103,7 +103,8 @@ impl ZBFileContentType {
 pub struct ZBFile {
     content_type: ZBFileContentType,
     has_header_row: bool,
-    remove_duplicate: bool,
+    /// Sent only when set; the API's default is true.
+    remove_duplicate: Option<bool>,
     email_address_column: u32,
     first_name_column: Option<u32>,
     last_name_column: Option<u32>,
@@ -122,7 +123,7 @@ impl Default for ZBFile {
         ZBFile {
             content_type: ZBFileContentType::Empty,
             has_header_row: true,
-            remove_duplicate: false,
+            remove_duplicate: None,
             email_address_column: 1,
             first_name_column: None,
             last_name_column: None,
@@ -190,7 +191,6 @@ impl ZBFile {
         let mut multipart_form = Form::new()
             .part("file", content_part)
             .text("has_header_row", self.has_header_row.to_string())
-            .text("remove_duplicate", self.remove_duplicate.to_string())
             .text(
                 "email_address_column",
                 self.email_address_column.to_string(),
@@ -213,6 +213,9 @@ impl ZBFile {
         if let Some(url) = &self.return_url {
             multipart_form = multipart_form.text("return_url", url.clone());
         }
+        if let Some(remove_duplicate) = self.remove_duplicate {
+            multipart_form = multipart_form.text("remove_duplicate", remove_duplicate.to_string());
+        }
 
         Ok(multipart_form)
     }
@@ -234,8 +237,10 @@ impl ZBFile {
         self
     }
 
+    /// Send `remove_duplicate`. Left unset, it is not sent and the API's
+    /// default (true) applies.
     pub fn set_remove_duplicate(mut self, remove_duplicate: bool) -> Self {
-        self.remove_duplicate = remove_duplicate;
+        self.remove_duplicate = Some(remove_duplicate);
         self
     }
 

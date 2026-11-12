@@ -298,6 +298,18 @@ fn a_key_that_is_empty_or_padded_is_rejected() {
     }
 }
 
+/// Trailing slashes on a custom base URL are stripped, so no request goes to
+/// `//api/v1/warmup/...`.
+#[test]
+fn a_base_url_with_trailing_slashes_reaches_the_documented_paths() {
+    let (port, fake) = start_fake();
+    for base in [format!("http://127.0.0.1:{port}/"), format!("http://127.0.0.1:{port}///")] {
+        let zb = ZeroBounceWarmup::with_base_url("warmup-key", &base).unwrap();
+        zb.get_seed_count().unwrap();
+        assert_eq!(fake.only().path, "/api/v1/warmup/seed-count", "{base}");
+    }
+}
+
 #[test]
 fn a_plain_http_base_url_is_rejected() {
     let error = ZeroBounceWarmup::with_base_url("key", "http://warmup-api.zerobounce.net")
@@ -924,6 +936,48 @@ fn smtp_credentials_never_appear_in_an_error() {
     assert_eq!(error.status_code(), Some(500));
 }
 
+/// The SMTP username and password are masked in every form a body can echo
+/// them in: as sent, URL-encoded and JSON-escaped.
+#[test]
+fn smtp_credentials_never_appear_in_an_error_in_any_form() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    let username = "bo\"b/+%1";
+    let password = format!("p@ss \"{}/+%x", test_password());
+    let json = |text: &str| {
+        let quoted = serde_json::to_string(text).unwrap();
+        quoted[1..quoted.len() - 1].to_string()
+    };
+    let mut forms = Vec::new();
+    for secret in [username, password.as_str()] {
+        forms.push(secret.to_string());
+        forms.push(query_encode(secret));
+        forms.push(json(secret));
+    }
+    // A JSON error whose message quotes each form, and a text body (an error
+    // status, or a 200 that is not JSON) that carries them as they are.
+    let quoted = json(&format!("login failed: {}", forms.join(" | ")));
+    let text = format!("login failed: {}", forms.join(" | "));
+    for (status, content_type, body) in [
+        (400, "application/json", format!(r#"{{"message":"{quoted}"}}"#)),
+        (500, "application/json", format!(r#"{{"message":"{quoted}"}}"#)),
+        (500, "text/plain", text.clone()),
+        (200, "text/plain", text.clone()),
+    ] {
+        {
+            fake.reply_with(status, content_type, &body);
+            let error = zb
+                .test_smtp_configuration("a@b.com", username, &password, "smtp.example.com", 587)
+                .unwrap_err();
+            let message = format!("{error} {error:?}");
+            for form in &forms {
+                assert!(!message.contains(form.as_str()), "{status} {content_type}: {form} in {message}");
+            }
+            assert!(message.contains("***"), "{message}");
+        }
+    }
+}
+
 #[test]
 fn an_html_error_page_is_not_pasted_into_the_message() {
     let (port, fake) = start_fake();
@@ -1083,7 +1137,8 @@ fn a_body_that_echoes_the_key_never_puts_it_in_a_warmup_error() {
     let (port, fake) = start_fake();
     let mut leaked = Vec::new();
     for case in ["echo-200error", "echo-200failure", "echo-400text", "echo-400json"] {
-        let key = format!("{case}/k+1 z");
+        // '"' is escaped in JSON and '%' encoded in a URL, so every form differs.
+        let key = format!("{case}/k+1 \"z%");
         let quoted = serde_json::to_string(&key).unwrap();
         let forms = [
             key.clone(),

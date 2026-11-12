@@ -110,9 +110,11 @@ impl ZeroBounce {
         )?;
         let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
 
+        // An empty 200 is not a result file: there is nothing to save.
         if crate::utility::http_error::body_looks_like_html(&body_str)
             || crate::utility::http_error::content_type_is_html(&content_type)
             || !status.is_success()
+            || body_str.trim().is_empty()
         {
             return Err(ZBError::api(
                 status.as_u16(),

@@ -243,6 +243,25 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
     if key.starts_with("html-200-") {
         return (200, "text/html; charset=UTF-8", page);
     }
+    // A 200 that is not a usable answer, for every call alike.
+    if key.starts_with("blank-octet-") {
+        return (200, "application/octet-stream", String::new());
+    }
+    if key.starts_with("blank-csv-") {
+        return (200, "text/csv", " \r\n".to_string());
+    }
+    if key.starts_with("plain-text-") {
+        return (200, "text/plain", "Service temporarily unavailable".to_string());
+    }
+    if key.starts_with("broken-json-") {
+        return (200, "application/json", r#"{"success": tru"#.to_string());
+    }
+    if key.starts_with("false-string-") {
+        return (200, "application/json", r#"{"success":"false","message":"File not found."}"#.to_string());
+    }
+    if key.starts_with("csv-as-json-") {
+        return (200, "application/json", "email,status\na@example.com,valid\n".to_string());
+    }
     // "empty-status-401-…": that status with an empty body.
     if let Some(status) = key
         .strip_prefix("empty-status-")
@@ -2175,9 +2194,10 @@ fn a_body_that_echoes_the_key_never_puts_it_in_an_error() {
         "echo-200typed",
     ];
     for case in cases {
-        // '/', '+' and ' ' are encoded, and encoded differently in a query
-        // and in a path, so each form differs.
-        let key = format!("{case}/k+1 z");
+        // '/', '+', '%', '"' and ' ' are encoded, and encoded differently in
+        // a query and in a path, and '"' is escaped in JSON, so each form
+        // differs.
+        let key = format!("{case}/k+1 \"z%");
         let quoted = json_escape(&key);
         let forms = [
             key.clone(),
@@ -2480,4 +2500,173 @@ fn a_transport_error_redacts_the_key_in_its_url() {
         assert!(!printed.contains("transport-secret-key"), "the key leaked: {printed}");
         assert!(printed.contains("REDACTED"), "{printed}");
     }
+}
+
+// -- 200 bodies that are not a usable answer ---------------------------------
+
+/// The swept methods that return a file: the ones whose result is
+/// `ZBBulkResponse::Content` when the server sends a CSV. Found by running
+/// every method, so a new download cannot be missed.
+fn download_methods(port: u16) -> BTreeSet<&'static str> {
+    let mut downloads = BTreeSet::new();
+    sweep_every_request_method(&client(port, "download-probe"), &mut |name, result| {
+        if result.is_ok_and(|value| value.starts_with("<ZBBulkResponse::Content")) {
+            downloads.insert(name);
+        }
+    });
+    // Validation and AI scoring (each with and without options), email
+    // finder and domain search.
+    assert!(downloads.len() >= 6, "found only {downloads:?}");
+    downloads
+}
+
+/// Every swept call made with `key`, as (name, result).
+fn sweep_with_key(port: u16, key: &str) -> Vec<(&'static str, Result<String, ZBError>)> {
+    let mut results = Vec::new();
+    sweep_every_request_method(&client(port, key), &mut |name, result| results.push((name, result)));
+    results
+}
+
+fn assert_status_200(name: &str, result: &Result<String, ZBError>) {
+    match result {
+        Err(error @ ZBError::ApiError { .. }) => assert_eq!(error.status_code(), Some(200), "{name}: {error:?}"),
+        other => panic!("{name}: expected an ApiError with status 200, got {other:?}"),
+    }
+}
+
+/// An empty 200 is not a result file. Every bulk download returned it as
+/// `ZBBulkResponse::Content` with no bytes, so the caller saved an empty file
+/// and was told it worked.
+#[test]
+fn every_download_rejects_an_empty_200() {
+    let (port, _fake) = start_fake();
+    let downloads = download_methods(port);
+    for key in ["blank-octet-key", "blank-csv-key"] {
+        for (name, result) in sweep_with_key(port, key) {
+            if downloads.contains(name) {
+                assert_status_200(&format!("{key} {name}"), &result);
+            }
+        }
+    }
+}
+
+/// A JSON content type on a download is an error even when the body does
+/// not look like a JSON error.
+#[test]
+fn every_download_rejects_a_json_content_type() {
+    let (port, _fake) = start_fake();
+    let downloads = download_methods(port);
+    for (name, result) in sweep_with_key(port, "csv-as-json-key") {
+        if downloads.contains(name) {
+            assert_status_200(name, &result);
+        }
+    }
+}
+
+/// Text that is not JSON, and JSON that does not parse, on a 2xx is an
+/// ApiError with that status on every JSON call (a download takes text).
+#[test]
+fn a_non_json_2xx_is_an_api_error_with_its_status_on_every_call() {
+    let (port, _fake) = start_fake();
+    let downloads = download_methods(port);
+    for (key, message) in [
+        ("plain-text-key", "Service temporarily unavailable"),
+        ("broken-json-key", "not valid JSON"),
+    ] {
+        for (name, result) in sweep_with_key(port, key) {
+            if downloads.contains(name) {
+                continue;
+            }
+            assert_status_200(&format!("{key} {name}"), &result);
+            let text = result.unwrap_err().to_string();
+            assert!(text.contains(message), "{key} {name}: {text}");
+        }
+    }
+}
+
+/// `{"success": "false"}` (a string, as some endpoints send it) is a failure
+/// on every call, downloads included, like `{"success": false}`.
+#[test]
+fn success_false_as_a_string_is_an_error_on_every_call() {
+    let (port, _fake) = start_fake();
+    let results = sweep_with_key(port, "false-string-key");
+    assert!(!results.is_empty());
+    for (name, result) in results {
+        assert_status_200(name, &result);
+        assert!(result.unwrap_err().to_string().contains("File not found."), "{name}");
+    }
+}
+
+/// `remove_duplicate` is sent only when the caller sets it: the API's
+/// default is true, and the SDK sent `false` unless told otherwise.
+#[test]
+fn sendfile_sends_remove_duplicate_only_when_set() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "dedupe-key");
+    let file = ZBFile::from_content(b"email\na@example.com\n".to_vec());
+    zb.bulk_validation_file_submit(&file).unwrap();
+    assert!(!only(&fake).fields.contains_key("remove_duplicate"), "sent though not set");
+    zb.ai_scoring_file_submit(&file).unwrap();
+    assert!(!only(&fake).fields.contains_key("remove_duplicate"), "sent though not set");
+    for flag in [false, true] {
+        let file = ZBFile::from_content(b"email\n".to_vec()).set_remove_duplicate(flag);
+        zb.bulk_validation_file_submit(&file).unwrap();
+        assert_eq!(only(&fake).fields.get("remove_duplicate"), Some(&flag.to_string()));
+        zb.ai_scoring_file_submit(&file).unwrap();
+        assert_eq!(only(&fake).fields.get("remove_duplicate"), Some(&flag.to_string()));
+    }
+}
+
+/// These request bodies are pinned field by field, so renaming a wire field
+/// fails here.
+#[test]
+fn request_bodies_use_the_documented_field_names() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "fields-key");
+    let fields = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+        pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect()
+    };
+
+    let file = ZBFile::from_content(b"email\n".to_vec())
+        .set_has_header_row(true)
+        .set_return_url(Some("https://example.com/done"));
+    zb.bulk_validation_file_submit(&file).unwrap();
+    assert_eq!(
+        only(&fake).fields,
+        fields(&[
+            ("api_key", "fields-key"),
+            ("file", "<file>"),
+            ("has_header_row", "true"),
+            ("email_address_column", "1"),
+            ("return_url", "https://example.com/done"),
+        ])
+    );
+
+    let options = CreateInboxPlacementTestOptions {
+        test_type: Some(2),
+        provider_ids: Some(vec![1, 2]),
+        seed_ids: Some(vec![3]),
+        providers: Some(vec![
+            InboxPlacementProviderSelection { id: 4, max_seeds: Some(5) },
+            InboxPlacementProviderSelection { id: 6, max_seeds: None },
+        ]),
+        ..Default::default()
+    };
+    zb.create_inbox_placement_test("t", &options).unwrap();
+    assert_eq!(
+        only(&fake).fields,
+        fields(&[
+            ("name", "t"),
+            ("testType", "2"),
+            ("providerIds", "[1,2]"),
+            ("seedIds", "[3]"),
+            ("providers", r#"[{"id":4,"maxSeeds":5},{"id":6}]"#),
+        ])
+    );
+
+    let filter = fields(&[("api_key", "fields-key"), ("rule", "exclude"), ("target", "domain"), ("value", "example.com")]);
+    zb.add_filter("exclude", "domain", "example.com").unwrap();
+    assert_eq!(only(&fake).fields, filter);
+    zb.delete_filter("exclude", "domain", "example.com").unwrap();
+    assert_eq!(only(&fake).fields, filter);
 }
