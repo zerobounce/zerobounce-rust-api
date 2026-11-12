@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `delete_inbox_placement_test` answered with an empty 2xx (`204 No Content`) now returns `Ok(Value::Null)`. It returned `ZBError::ApiError` with status 204 and `Empty response from ZeroBounce (HTTP 204)`, although the test was deleted. The Go SDK already treats it as a success. The other Inbox Placement calls must return data, so an empty 2xx on them is still an error. Affects 3.0.0 to 4.0.1.
 
+### Security
+
+- An error built from a response body no longer carries the API key. A body that echoed the key (`{"error": "Invalid API key <key>"}` or `{"success": false, "message": "... <key>"}` on an HTTP 200, a 400 quoting the request URL with `?api_key=<key>`, a JSON error on a 4xx/5xx, a bulk getfile error, `batch_validate`'s error for address `all`) was passed on as the `ZBError::ApiError` message by every `ZeroBounce` request method. The key is now masked as `***` in such a message, as sent, percent-encoded and JSON-escaped, and so is any `api_key=` value. `ZeroBounceWarmup` masked only the key as sent, and not at all in the error for a JSON body in place of a CSV download (`download_seeds`, `download_statistics`); it now masks every form there too. Affects 3.0.0 to 4.0.1.
+
 ## [4.0.1] - 2026-11-11
 
 ### Changed

@@ -152,7 +152,79 @@ fn success_body(path: &str, key: &str) -> (u16, &'static str, String) {
     )
 }
 
+/// Percent-encoding as a form or query string carries text: unreserved
+/// characters stay, a space is `+`, everything else is `%XX`.
+fn query_encode(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'*' => out.push(byte as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// Strict percent-encoding (RFC 3986 path segments): only unreserved
+/// characters stay.
+fn path_encode(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// "echo-…" keys: a body that quotes the key the request carried, the way a
+/// proxy or an error page might.
+fn echo_answer(path: &str, key: &str) -> Option<(u16, &'static str, String)> {
+    let quoted = json_escape(key);
+    let inner = &quoted[1..quoted.len() - 1];
+    if key.starts_with("echo-200error") {
+        return Some((200, "application/json", format!(r#"{{"error":"Invalid API key {inner}"}}"#)));
+    }
+    if key.starts_with("echo-200failure") {
+        return Some((200, "application/json", format!(r#"{{"success":false,"message":"Key {inner} is not allowed"}}"#)));
+    }
+    if key.starts_with("echo-400text") {
+        return Some((
+            400,
+            "text/plain",
+            format!(
+                "Bad request: https://api.zerobounce.net{path}?api_key={} (key {key}, path {}, json {})",
+                query_encode(key),
+                path_encode(key),
+                inner.replace('/', "\\/")
+            ),
+        ));
+    }
+    // A bare message: a result for most calls, an error for the email finder
+    // and domain search.
+    if key.starts_with("echo-200message") {
+        return Some((200, "application/json", format!(r#"{{"Message":"Invalid API key {inner}"}}"#)));
+    }
+    // batch_validate's account-level error; other calls succeed.
+    if key.starts_with("echo-200batch") && path.contains("validatebatch") {
+        return Some((
+            200,
+            "application/json",
+            format!(r#"{{"email_batch":[],"errors":[{{"error":"Invalid API key {inner}","email_address":"all"}}]}}"#),
+        ));
+    }
+    if key.starts_with("echo-400json") {
+        return Some((400, "application/json", format!(r#"{{"error":"Invalid API key {inner}"}}"#)));
+    }
+    None
+}
+
 fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
+    if let Some(echo) = echo_answer(path, key) {
+        return echo;
+    }
     let page = html_page();
     if key.starts_with("html-403-") {
         return (403, "text/html; charset=UTF-8", page);
@@ -2054,6 +2126,49 @@ fn a_body_cut_short_is_an_error_on_every_public_request_method() {
     assert!(!swept.is_empty());
     assert!(accepted.is_empty(), "a body cut short was accepted: {accepted:#?}");
     assert!(leaked.is_empty(), "errors carrying the key: {leaked:?}");
+}
+
+/// No request returns the API key in an error, whatever form of it the
+/// response body echoes: an error-only 200, a {"success": false} 200, a text
+/// 400 quoting the request URL, or a JSON 400. Messages built from a response
+/// body used to be passed on as they came, so a body that quoted the key put
+/// it in `ZBError::ApiError` on every call.
+#[test]
+fn a_body_that_echoes_the_key_never_puts_it_in_an_error() {
+    let (port, fake) = start_fake();
+    let mut leaked = Vec::new();
+    let cases = ["echo-200error", "echo-200failure", "echo-400text", "echo-400json", "echo-200message", "echo-200batch"];
+    for case in cases {
+        // '/', '+' and ' ' are encoded, and encoded differently in a query
+        // and in a path, so each form differs.
+        let key = format!("{case}/k+1 z");
+        let quoted = json_escape(&key);
+        let forms = [
+            key.clone(),
+            query_encode(&key),
+            path_encode(&key),
+            quoted[1..quoted.len() - 1].to_string(),
+            key.replace('/', "\\/"),
+        ];
+        let zb = client(port, &key);
+        let mut failed = 0;
+        let swept = sweep_every_request_method(&zb, &mut |name, result| {
+            if let Err(error) = result {
+                failed += 1;
+                let texts = [error.to_string(), format!("{error:?}")];
+                if forms.iter().any(|form| texts.iter().any(|text| text.contains(form.as_str()))) {
+                    leaked.push(format!("{case} {name}: {error:?}"));
+                }
+            }
+        });
+        assert!(fake.len() >= swept.len(), "{case}: not every call reached the fake");
+        fake.take();
+        // Most calls fail on the first four bodies, a few on the last two; if
+        // none did, nothing was checked.
+        let least = if case.starts_with("echo-200message") || case.starts_with("echo-200batch") { 1 } else { swept.len() / 2 };
+        assert!(failed >= least, "{case}: only {failed} of {} calls failed", swept.len());
+    }
+    assert!(leaked.is_empty(), "{} errors carry the key: {leaked:#?}", leaked.len());
 }
 
 /// The plaintext client itself works: the same requests reach the fake once

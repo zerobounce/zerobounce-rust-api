@@ -32,12 +32,103 @@ pub(crate) fn redacted_key(api_key: &str) -> &'static str {
     }
 }
 
+/// Every form a message can carry `secret` in: as sent, percent-encoded the
+/// way a query or form encodes it and strictly (path escaping), and
+/// JSON-escaped, with and without `\/` for `/`.
+fn secret_forms(secret: &str) -> Vec<String> {
+    let mut query = String::new();
+    let mut strict = String::new();
+    for byte in secret.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' => {
+                query.push(byte as char);
+                strict.push(byte as char);
+            }
+            b'*' => {
+                query.push('*');
+                strict.push_str("%2A");
+            }
+            b' ' => {
+                query.push('+');
+                strict.push_str("%20");
+            }
+            _ => {
+                query.push_str(&format!("%{byte:02X}"));
+                strict.push_str(&format!("%{byte:02X}"));
+            }
+        }
+    }
+    let quoted = serde_json::to_string(secret).unwrap_or_default();
+    let json = quoted
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .unwrap_or(secret)
+        .to_string();
+    let json_slash = json.replace('/', "\\/");
+    vec![secret.to_string(), query, strict, json, json_slash]
+}
+
+/// Mask every `api_key=` value in a message, whichever key it holds.
+fn scrub_query_string_values(text: &str) -> String {
+    // ASCII lowercasing keeps every byte offset, so indexes found in `lower`
+    // are char boundaries in `text` too.
+    let lower = text.to_ascii_lowercase();
+    let mut out = String::with_capacity(text.len());
+    let mut from = 0;
+    while let Some(found) = lower[from..].find("api_key=") {
+        let value_start = from + found + "api_key=".len();
+        out.push_str(&text[from..value_start]);
+        let value_end = text[value_start..]
+            .find(|c: char| c == '&' || c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>'))
+            .map_or(text.len(), |offset| value_start + offset);
+        if value_end > value_start {
+            out.push_str("***");
+        }
+        from = value_end;
+    }
+    out.push_str(&text[from..]);
+    out
+}
+
+/// Replace every form of each secret in `text` with `***`, and every
+/// `api_key=` value. Both API clients pass each message built from a
+/// response body through it, so a body that echoes the key (an error quoting
+/// the request URL, `{"error": "Invalid API key <key>"}`) does not hand the
+/// key to the caller.
+pub(crate) fn redact_secrets(text: &str, secrets: &[&str]) -> String {
+    let mut value = text.to_string();
+    for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
+        for form in secret_forms(secret) {
+            if !form.is_empty() {
+                value = value.replace(&form, "***");
+            }
+        }
+    }
+    scrub_query_string_values(&value)
+}
+
 /// The HTTP client both API clients use: explicit timeout, redirects never
 /// followed (the API key travels with every request, and a redirect could
 /// send it to another host). If it cannot be built there is no fallback: a
 /// default client would follow redirects.
 pub(crate) fn http_client() -> ZBResult<reqwest::blocking::Client> {
-    http_client_with_timeout(REQUEST_TIMEOUT)
+    http_client_with_timeout(scaled_for_tests(REQUEST_TIMEOUT))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// This crate's unit tests divide the timeout [`http_client`] builds in
+    /// by this, so a test can prove that the clients the public constructors
+    /// build carry [`REQUEST_TIMEOUT`] without waiting two minutes.
+    static TIMEOUT_DIVISOR: std::cell::Cell<u32> = const { std::cell::Cell::new(1) };
+}
+
+/// `timeout` unchanged, except in this crate's unit tests, which may shrink
+/// it ([`TIMEOUT_DIVISOR`]).
+fn scaled_for_tests(timeout: std::time::Duration) -> std::time::Duration {
+    #[cfg(test)]
+    let timeout = timeout / TIMEOUT_DIVISOR.with(|divisor| divisor.get());
+    timeout
 }
 
 /// How long one request may take, from connecting to the last byte of the
@@ -64,8 +155,25 @@ fn client_or_error(
 }
 
 #[cfg(test)]
+mod redaction_tests {
+    use super::redact_secrets;
+
+    /// Every form of a key, and any api_key value, whichever key it holds.
+    #[test]
+    fn every_form_of_a_secret_is_masked() {
+        let text = r"raw a/b+c d*e, query a%2Fb%2Bc+d*e, path a%2Fb%2Bc%20d%2Ae, json a\/b+c d*e, url https://x.test/v2?api_key=other-key&email=a";
+        assert_eq!(
+            redact_secrets(text, &["a/b+c d*e"]),
+            "raw ***, query ***, path ***, json ***, url https://x.test/v2?api_key=***&email=a"
+        );
+        assert_eq!(redact_secrets("API_KEY=x", &[]), "API_KEY=***");
+        assert_eq!(redact_secrets("no secret here", &["", "absent"]), "no secret here");
+    }
+}
+
+#[cfg(test)]
 mod http_client_tests {
-    use super::{client_or_error, http_client_with_timeout, ZBError, REQUEST_TIMEOUT};
+    use super::{client_or_error, http_client_with_timeout, ZBError, REQUEST_TIMEOUT, TIMEOUT_DIVISOR};
     use std::io::Read;
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -76,11 +184,8 @@ mod http_client_tests {
         assert_eq!(REQUEST_TIMEOUT, Duration::from_secs(120));
     }
 
-    /// A server that accepts the request and never answers. Without a
-    /// timeout the call would hang for ever; the test gives up after 20
-    /// seconds and fails instead.
-    #[test]
-    fn a_server_that_never_answers_times_out() {
+    /// A local server that accepts every request, reads it and never answers.
+    fn never_answering_server() -> u16 {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
@@ -91,6 +196,15 @@ mod http_client_tests {
                 held.push(stream);
             }
         });
+        port
+    }
+
+    /// A server that accepts the request and never answers. Without a
+    /// timeout the call would hang for ever; the test gives up after 20
+    /// seconds and fails instead.
+    #[test]
+    fn a_server_that_never_answers_times_out() {
+        let port = never_answering_server();
         let client = http_client_with_timeout(Duration::from_millis(300)).unwrap();
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
@@ -104,6 +218,48 @@ mod http_client_tests {
         let error = result.expect_err("a server that never answered gave a response");
         assert!(error.is_timeout(), "{error}");
         assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
+    }
+
+    /// The clients `ZeroBounce::new`, `ZeroBounce::with_base_url` and
+    /// `ZeroBounceWarmup::with_base_url` (which `ZeroBounceWarmup::new` calls)
+    /// build give up after REQUEST_TIMEOUT. The test shrinks that 100-fold
+    /// (to 1.2 s), so a client built with any other timeout (or none) fails
+    /// here: too soon, too late, or still waiting after 20 s.
+    #[test]
+    fn the_public_constructors_build_clients_with_the_request_timeout() {
+        const DIVISOR: u32 = 100;
+        let port = never_answering_server();
+        let base = format!("http://127.0.0.1:{port}");
+        TIMEOUT_DIVISOR.with(|divisor| divisor.set(DIVISOR));
+        let mut from_new = crate::ZeroBounce::new("timeout-key");
+        from_new.url_provider.url = format!("{base}/v2");
+        let from_base_url = crate::ZeroBounce::with_base_url("timeout-key", format!("{base}/v2")).unwrap();
+        let warmup = crate::ZeroBounceWarmup::with_base_url("timeout-key", &base).unwrap();
+        TIMEOUT_DIVISOR.with(|divisor| divisor.set(1));
+
+        type Call = Box<dyn FnOnce() -> Result<String, ZBError> + Send>;
+        let calls: Vec<(&str, Call)> = vec![
+            ("ZeroBounce::new", Box::new(move || from_new.get_credits().map(|v| format!("{v:?}")))),
+            ("ZeroBounce::with_base_url", Box::new(move || from_base_url.get_credits().map(|v| format!("{v:?}")))),
+            ("ZeroBounceWarmup::with_base_url", Box::new(move || warmup.get_seeds().map(|v| format!("{v:?}")))),
+        ];
+        let expected = REQUEST_TIMEOUT / DIVISOR;
+        for (name, call) in calls {
+            let (sender, receiver) = mpsc::channel();
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let result = call();
+                let _ = sender.send((result, started.elapsed()));
+            });
+            let (result, elapsed) = receiver
+                .recv_timeout(Duration::from_secs(20))
+                .unwrap_or_else(|_| panic!("{name}: still waiting after 20 s, want a timeout after {expected:?}"));
+            assert!(result.is_err(), "{name}: a server that never answered gave {result:?}");
+            assert!(
+                elapsed >= expected * 9 / 10 && elapsed <= expected * 3 / 2,
+                "{name}: gave up after {elapsed:?}, want about {expected:?}"
+            );
+        }
     }
 
     /// Both API clients get their reqwest client from `http_client`, so the
@@ -377,6 +533,18 @@ impl ZBError {
         ZBError::ApiError {
             status,
             message: message.into(),
+        }
+    }
+
+    /// This error with every secret masked in an API error's message
+    /// ([`redact_secrets`]). Other errors carry no response body.
+    pub(crate) fn redacted(self, secrets: &[&str]) -> ZBError {
+        match self {
+            ZBError::ApiError { status, message } => ZBError::ApiError {
+                status,
+                message: redact_secrets(&message, secrets),
+            },
+            other => other,
         }
     }
 

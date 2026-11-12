@@ -104,14 +104,10 @@ impl ZeroBounceWarmup {
 
     /// Replace every form of a secret in a message with `***`.
     fn redact(&self, text: &str, secrets: &[&str]) -> String {
-        let mut value = text.to_string();
-        for secret in std::iter::once(self.api_key.as_str()).chain(secrets.iter().copied()) {
-            if secret.is_empty() {
-                continue;
-            }
-            value = value.replace(secret, "***");
-        }
-        value
+        let all: Vec<&str> = std::iter::once(self.api_key.as_str())
+            .chain(secrets.iter().copied())
+            .collect();
+        crate::utility::redact_secrets(text, &all)
     }
 
     fn send(
@@ -219,7 +215,7 @@ impl ZeroBounceWarmup {
         {
             return Err(ZBError::api(
                 status,
-                message_from_body(status, &content_type, &text),
+                self.redact(&message_from_body(status, &content_type, &text), &[]),
             ));
         }
         Ok(text)

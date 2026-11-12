@@ -136,8 +136,9 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                     body,
                 });
 
+                let echoed = echo_answer(path, &api_key);
                 let (status, content_type, payload) =
-                    fake.reply.lock().unwrap().take().unwrap_or_else(|| {
+                    fake.reply.lock().unwrap().take().or(echoed).unwrap_or_else(|| {
                         if path.ends_with("/download") {
                             (
                                 200,
@@ -169,6 +170,61 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
             }
         }
     }
+}
+
+/// Percent-encoding as a form or query string carries text.
+fn query_encode(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'*' => out.push(byte as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// Strict percent-encoding (RFC 3986 path segments).
+fn path_encode(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+/// For an "echo-…" key, a body that quotes the key the request carried, the
+/// way a proxy or an error page might.
+fn echo_answer(path: &str, key: &str) -> Option<(u16, String, String)> {
+    let quoted = serde_json::to_string(key).unwrap();
+    let inner = &quoted[1..quoted.len() - 1];
+    let json = "application/json".to_string();
+    if key.starts_with("echo-200error") {
+        return Some((200, json, format!(r#"{{"error":"Invalid API key {inner}"}}"#)));
+    }
+    if key.starts_with("echo-200failure") {
+        return Some((200, json, format!(r#"{{"success":false,"message":"Key {inner} is not allowed"}}"#)));
+    }
+    if key.starts_with("echo-400text") {
+        return Some((
+            400,
+            "text/plain".to_string(),
+            format!(
+                "Bad request: https://warmup-api.zerobounce.net{path}?api_key={} (key {key}, path {}, json {})",
+                query_encode(key),
+                path_encode(key),
+                inner.replace('/', "\\/")
+            ),
+        ));
+    }
+    if key.starts_with("echo-400json") {
+        return Some((400, json, format!(r#"{{"error":"Invalid API key {inner}"}}"#)));
+    }
+    None
 }
 
 fn start_fake() -> (u16, Arc<Fake>) {
@@ -841,6 +897,41 @@ fn public_warmup_request_methods() -> BTreeSet<String> {
     }
     assert!(names.len() > 20, "found only {names:?} in src/warmup.rs");
     names
+}
+
+/// No Warmup method returns the key in an error, whatever form of it the
+/// response body echoes. A JSON error on an HTTP 200 is a result for most
+/// Warmup calls, but an error for the CSV downloads, and that message used to
+/// carry the key as it came; a URL-encoded key was not masked at all.
+#[test]
+fn a_body_that_echoes_the_key_never_puts_it_in_a_warmup_error() {
+    let (port, fake) = start_fake();
+    let mut leaked = Vec::new();
+    for case in ["echo-200error", "echo-200failure", "echo-400text", "echo-400json"] {
+        let key = format!("{case}/k+1 z");
+        let quoted = serde_json::to_string(&key).unwrap();
+        let forms = [
+            key.clone(),
+            query_encode(&key),
+            path_encode(&key),
+            quoted[1..quoted.len() - 1].to_string(),
+            key.replace('/', "\\/"),
+        ];
+        let zb = ZeroBounceWarmup::with_base_url(&key, &format!("http://127.0.0.1:{port}")).unwrap();
+        let mut failed = 0;
+        let swept = sweep_every_warmup_method(&zb, &mut |name, result| {
+            if let Err(error) = result {
+                failed += 1;
+                let texts = [error.to_string(), format!("{error:?}")];
+                if forms.iter().any(|form| texts.iter().any(|text| text.contains(form.as_str()))) {
+                    leaked.push(format!("{case} {name}: {error:?}"));
+                }
+            }
+        });
+        assert!(fake.take().len() >= swept.len(), "{case}: not every call reached the fake");
+        assert!(failed > 0, "{case}: no call failed, so nothing was checked");
+    }
+    assert!(leaked.is_empty(), "{} errors carry the key: {leaked:#?}", leaked.len());
 }
 
 /// A response cut short (the connection closes before the announced

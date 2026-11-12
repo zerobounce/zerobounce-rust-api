@@ -56,6 +56,19 @@ impl ZeroBounce {
         options: Option<&ZBGetFileOptions>,
         is_scoring: bool,
     ) -> ZBResult<ZBBulkResponse> {
+        self.result_fetch_unredacted(url, file_id, options, is_scoring)
+            .map_err(|error| self.redact_error(error))
+    }
+
+    /// [`result_fetch_at`](Self::result_fetch_at) before the key is masked in
+    /// its errors, which quote the getfile body.
+    fn result_fetch_unredacted(
+        &self,
+        url: String,
+        file_id: &str,
+        options: Option<&ZBGetFileOptions>,
+        is_scoring: bool,
+    ) -> ZBResult<ZBBulkResponse> {
         self.require_key()?;
         let mut query: Vec<(&str, String)> = vec![
             ("api_key", self.api_key.clone()),
