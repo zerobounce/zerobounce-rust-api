@@ -13,7 +13,9 @@ pub use crate::utility::structures::validate_enums::{ZBValidateStatus, ZBValidat
 pub use crate::utility::structures::{ActivityData, ApiUsage};
 pub use crate::utility::{format_get_file_error_message, get_file_json_indicates_error};
 pub use crate::utility::{ApiBaseUrl, ZBError, ZBResult};
-pub use crate::warmup::{EmailContent, ManagedSending, OnboardingModel, ZeroBounceWarmup};
+#[allow(deprecated)]
+pub use crate::warmup::{EmailContent, ManagedSending};
+pub use crate::warmup::{OnboardingModel, ZbManagedEmailContent, ZbManagedSending, ZeroBounceWarmup};
 
 /// The base URLs requests are built from.
 ///

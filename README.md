@@ -866,6 +866,31 @@ warmup.add_sending_account(
 )?;
 ```
 
+Have ZeroBounce provision and send from the mailbox (`zb_managed`). Every field of `email_content` and `managed_sending` is optional and sent only when set; `timezone_offset` is -11.0 to 14.0 hours, fractional offsets such as 5.5 included. A 200 means the request was accepted; the mailbox is provisioned afterwards.
+
+```rust
+use zero_bounce::{ZbManagedEmailContent, ZbManagedSending, ZeroBounceWarmup};
+
+let warmup = ZeroBounceWarmup::new("<YOUR_WARMUP_API_KEY>")?;
+
+let mut content = ZbManagedEmailContent::default();
+content.company_name = Some("Acme".into());
+content.company_website = Some("https://acme.example".into());
+content.company_description = Some("We make anvils.".into());
+content.types_of_emails = vec!["newsletter".into()]; // transactional, newsletter, marketing
+content.example_email = Some("Hi, our new anvil is out.".into());
+
+let mut sending = ZbManagedSending::default();
+sending.weekdays_only = Some(true);
+sending.timezone = Some("Asia/Kolkata".into());
+sending.timezone_offset = Some(5.5);
+sending.warmup_start_date = chrono::NaiveDate::from_ymd_opt(2026, 12, 1);
+
+warmup.add_zb_managed_sending_account("sender@example.com", None, Some(&content), Some(&sending))?;
+```
+
+`add_sending_account` with `OnboardingModel::ZbManaged` and the `EmailContent` / `ManagedSending` structs still works but is deprecated: those structs cannot carry the other documented fields. Their `website` is sent as `company_website`; `industry` and `daily_limit` are not read by the API and are not sent.
+
 A custom engagement rule can be changed only once every seven days; inside that window the API answers 429.
 
 ```rust

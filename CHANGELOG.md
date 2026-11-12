@@ -7,13 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ZeroBounceWarmup::add_zb_managed_sending_account(from_address, ignore_conflict, email_content, managed_sending)`, with `ZbManagedEmailContent` (`company_name`, `company_website`, `company_description`, `types_of_emails`, `example_email`) and `ZbManagedSending` (`weekdays_only`, `timezone`, `timezone_offset` as an `f64` from -11.0 to 14.0, `warmup_start_date`): the `zb_managed` payload as the API documents it. Each field is sent only when set. Both structs are `#[non_exhaustive]`: build them from `Default::default()` and assign fields. A `timezone_offset` outside -11.0 to 14.0, or NaN, is `ZBError::ExplicitError("timezone_offset must be -11.0 to 14.0")` before a request.
+
+### Deprecated
+
+- `EmailContent` and `ManagedSending`, the `zb_managed` arguments of `add_sending_account`. They cannot carry `company_description`, `example_email`, `weekdays_only`, `timezone` or a fractional `timezone_offset` such as 5.5, and adding fields to them would break struct literals, so new structs replace them. `add_sending_account` itself is not deprecated (it is the `self_managed` call) and still accepts them. Upgrading: use `add_zb_managed_sending_account` with `ZbManagedEmailContent` and `ZbManagedSending`.
+
 ### Fixed
 
+- `add_sending_account` with `OnboardingModel::ZbManaged` sent `email_content.website`, `email_content.industry` and `managed_sending.daily_limit`, none of which the API reads, so the website was lost. `EmailContent::website` is now sent as `company_website`, and `industry` and `daily_limit` are no longer sent (the API does not apply a daily limit). Affects 3.0.0 to 4.0.1.
+- `ZeroBounceWarmup::download_seeds` and `download_statistics` returned an HTML page (a `text/html` 200, or an HTML body under any content type) and a JSON body sent with a non-JSON content type as the CSV text. They now return `ZBError::ApiError` with the status (200), like an empty body or a JSON content type already did. Affects 3.0.0 to 4.0.1.
 - `delete_inbox_placement_test` answered with an empty 2xx (`204 No Content`) now returns `Ok(Value::Null)`. It returned `ZBError::ApiError` with status 204 and `Empty response from ZeroBounce (HTTP 204)`, although the test was deleted. The Go SDK already treats it as a success. The other Inbox Placement calls must return data, so an empty 2xx on them is still an error. Affects 3.0.0 to 4.0.1.
 
 ### Security
 
 - An error built from a response body no longer carries the API key. A body that echoed the key (`{"error": "Invalid API key <key>"}` or `{"success": false, "message": "... <key>"}` on an HTTP 200, a 400 quoting the request URL with `?api_key=<key>`, a JSON error on a 4xx/5xx, a bulk getfile error, `batch_validate`'s error for address `all`) was passed on as the `ZBError::ApiError` message by every `ZeroBounce` request method. The key is now masked as `***` in such a message, as sent, percent-encoded and JSON-escaped, and so is any `api_key=` value. `ZeroBounceWarmup` masked only the key as sent, and not at all in the error for a JSON body in place of a CSV download (`download_seeds`, `download_statistics`); it now masks every form there too. Affects 3.0.0 to 4.0.1.
+- `ZBError::JsonError` no longer carries response-body content. When a 2xx body had a field of the wrong type (`get_api_usage`, `get_activity_data`, `score_email`, `score_email_post`, `find_email`, `domain_search`, `domain_search_v2`), serde's error quoted the value (`invalid type: string "<value>", expected u64`), so a body that echoed the API key there put it in the error's `Debug` output and in the `serde_json::Error` it carries. The inner error now says only `invalid JSON`, `unexpected JSON data`, `unexpected end of JSON` or `I/O error` with the line and column (`line()` and `column()` are kept); its `classify()` is now always `Category::Data`. The `Display` text (`ZeroBounce returned a response that is not valid JSON.`) is unchanged. Affects 3.0.0 to 4.0.1.
 
 ## [4.0.1] - 2026-11-11
 

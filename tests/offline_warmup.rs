@@ -12,7 +12,11 @@ use std::time::Duration;
 
 use chrono::NaiveDate;
 use serde_json::Value;
-use zero_bounce::{EmailContent, ManagedSending, OnboardingModel, ZBError, ZeroBounceWarmup};
+#[allow(deprecated)]
+use zero_bounce::{EmailContent, ManagedSending};
+use zero_bounce::{
+    OnboardingModel, ZBError, ZbManagedEmailContent, ZbManagedSending, ZeroBounceWarmup,
+};
 
 #[derive(Clone, Debug)]
 struct Recorded {
@@ -467,6 +471,7 @@ fn update_sending_account_checks_its_ranges() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn add_sending_account_checks_the_onboarding_model() {
     let (port, fake) = start_fake();
     let zb = client(port);
@@ -503,6 +508,7 @@ fn add_sending_account_checks_the_onboarding_model() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn add_sending_account_checks_the_zb_managed_payload() {
     let (port, fake) = start_fake();
     let zb = client(port);
@@ -559,6 +565,135 @@ fn add_sending_account_checks_the_zb_managed_payload() {
     assert_eq!(body["onboarding_model"], "zb_managed");
     assert_eq!(body["email_content"]["types_of_emails"][1], "marketing");
     assert_eq!(body["managed_sending"]["warmup_start_date"], "2026-03-04");
+}
+
+/// Up to 4.0.1 the 3.0.0 structs sent `email_content.industry`,
+/// `email_content.website` and `managed_sending.daily_limit`, which the API
+/// does not read. A website now goes out as `company_website`, and the other
+/// two are no longer sent.
+#[test]
+#[allow(deprecated)]
+fn add_sending_account_sends_the_old_struct_fields_the_api_reads() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    let content = EmailContent {
+        types_of_emails: vec!["transactional".into()],
+        industry: Some("Software".into()),
+        company_name: Some("Acme".into()),
+        website: Some("https://acme.example".into()),
+    };
+    let sending = ManagedSending {
+        timezone_offset: Some(3),
+        warmup_start_date: Some(date("2026-03-04")),
+        daily_limit: Some(40),
+    };
+    zb.add_sending_account(
+        "a@b.com",
+        OnboardingModel::ZbManaged,
+        None,
+        None,
+        Some(&content),
+        Some(&sending),
+    )
+    .unwrap();
+    let body = fake.only().body.unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "from_address": "a@b.com",
+            "onboarding_model": "zb_managed",
+            "email_content": {
+                "types_of_emails": ["transactional"],
+                "company_name": "Acme",
+                "company_website": "https://acme.example",
+            },
+            "managed_sending": {
+                "timezone_offset": 3,
+                "warmup_start_date": "2026-03-04",
+            },
+        })
+    );
+}
+
+/// The documented zb_managed payload, every field set.
+#[test]
+fn add_zb_managed_sending_account_sends_the_documented_payload() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    let mut content = ZbManagedEmailContent::default();
+    content.company_name = Some("Acme".into());
+    content.company_website = Some("https://acme.example".into());
+    content.company_description = Some("We make anvils.".into());
+    content.types_of_emails = vec!["newsletter".into(), "marketing".into()];
+    content.example_email = Some("Hi, our new anvil is out.".into());
+    let mut sending = ZbManagedSending::default();
+    sending.weekdays_only = Some(false);
+    sending.timezone = Some("Asia/Kolkata".into());
+    sending.timezone_offset = Some(5.5);
+    sending.warmup_start_date = Some(date("2026-03-04"));
+    zb.add_zb_managed_sending_account("a@b.com", Some(true), Some(&content), Some(&sending))
+        .unwrap();
+    let request = fake.only();
+    assert_eq!(request.method, "POST");
+    assert_eq!(request.path, "/api/v1/warmup/sending-accounts");
+    assert_eq!(
+        request.body.unwrap(),
+        serde_json::json!({
+            "from_address": "a@b.com",
+            "onboarding_model": "zb_managed",
+            "ignore_conflict": true,
+            "email_content": {
+                "company_name": "Acme",
+                "company_website": "https://acme.example",
+                "company_description": "We make anvils.",
+                "types_of_emails": ["newsletter", "marketing"],
+                "example_email": "Hi, our new anvil is out.",
+            },
+            "managed_sending": {
+                "weekdays_only": false,
+                "timezone": "Asia/Kolkata",
+                "timezone_offset": 5.5,
+                "warmup_start_date": "2026-03-04",
+            },
+        })
+    );
+
+    // Nothing set: only the required fields go out.
+    zb.add_zb_managed_sending_account("a@b.com", None, None, None).unwrap();
+    assert_eq!(
+        fake.only().body.unwrap(),
+        serde_json::json!({"from_address": "a@b.com", "onboarding_model": "zb_managed"})
+    );
+}
+
+/// timezone_offset is -11.0 to 14.0 hours, whole or fractional.
+#[test]
+fn add_zb_managed_sending_account_checks_the_timezone_offset() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    for offset in [3.0, 5.5, -11.0, 14.0, -3.5] {
+        let mut sending = ZbManagedSending::default();
+        sending.timezone_offset = Some(offset);
+        zb.add_zb_managed_sending_account("a@b.com", None, None, Some(&sending))
+            .unwrap_or_else(|error| panic!("{offset}: {error}"));
+        let body = fake.only().body.unwrap();
+        assert_eq!(body["managed_sending"]["timezone_offset"].as_f64(), Some(offset));
+    }
+    for offset in [-11.5, 14.5, 15.0, f64::NAN, f64::INFINITY] {
+        let mut sending = ZbManagedSending::default();
+        sending.timezone_offset = Some(offset);
+        let error = zb
+            .add_zb_managed_sending_account("a@b.com", None, None, Some(&sending))
+            .unwrap_err();
+        assert!(error.to_string().contains("timezone_offset"), "{offset}: {error}");
+    }
+    let mut content = ZbManagedEmailContent::default();
+    content.types_of_emails = vec!["promotional".into()];
+    assert!(zb
+        .add_zb_managed_sending_account("a@b.com", None, Some(&content), None)
+        .is_err());
+    assert!(zb.add_zb_managed_sending_account(" ", None, None, None).is_err());
+    assert!(fake.take().is_empty());
 }
 
 #[test]
@@ -663,6 +798,42 @@ fn a_json_error_in_place_of_a_csv_is_an_error() {
     );
     let error = zb.download_seeds().unwrap_err();
     assert_eq!(error.to_string(), "No statistics for this address.");
+}
+
+/// A CSV download is an error, not the file, when the 200 is an HTML page (by
+/// content type or by body), a JSON body under a CSV content type, or empty.
+/// Only a JSON content type and an empty body were checked, so an HTML page or
+/// a JSON error sent as text/csv came back as the CSV.
+#[test]
+fn an_html_page_json_body_or_empty_body_in_place_of_a_csv_is_an_error() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    let page = "<!DOCTYPE html><html><head><title>Just a moment</title></head><body></body></html>";
+    let cases = [
+        ("html content type", "text/html; charset=UTF-8", page),
+        ("html body as csv", "text/csv", page),
+        ("json object as csv", "text/csv", r#"{"message":"No seeds for this team."}"#),
+        ("json list as csv", "text/plain", r#"["No seeds for this team."]"#),
+        ("empty", "text/csv", "  \n"),
+    ];
+    for (name, content_type, body) in cases {
+        for (method, result) in [
+            ("download_seeds", {
+                fake.reply_with(200, content_type, body);
+                zb.download_seeds()
+            }),
+            ("download_statistics", {
+                fake.reply_with(200, content_type, body);
+                zb.download_statistics("a@b.com")
+            }),
+        ] {
+            match result {
+                Ok(csv) => panic!("{name}: {method} returned {csv:?} as the CSV"),
+                Err(error) => assert_eq!(error.status_code(), Some(200), "{name}: {method}: {error:?}"),
+            }
+        }
+        fake.take();
+    }
 }
 
 #[test]
@@ -834,6 +1005,10 @@ fn sweep_every_warmup_method(
     sweep!(
         "add_sending_account",
         zb.add_sending_account(address, OnboardingModel::SelfManaged, Some(0), None, None, None)
+    );
+    sweep!(
+        "add_zb_managed_sending_account",
+        zb.add_zb_managed_sending_account(address, None, None, None)
     );
     sweep!("update_sending_account", zb.update_sending_account(address, 1, 4, true));
     sweep!("delete_sending_account", zb.delete_sending_account(address));

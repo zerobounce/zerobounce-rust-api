@@ -171,7 +171,7 @@ impl ZeroBounce {
         let mut serializer = serde_json::Serializer::new(Vec::new());
         Value::Object(request_body_map)
             .serialize(&mut serializer)
-            .map_err(ZBError::JsonError)?;
+            .map_err(ZBError::from)?;
 
         let final_string = String::from_utf8(serializer.into_inner())
             .map_err(|error| ZBError::ExplicitError(error.to_string()))?;

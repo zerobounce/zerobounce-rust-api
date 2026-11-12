@@ -39,23 +39,77 @@ impl OnboardingModel {
     }
 }
 
-/// What ZeroBounce should send on your behalf, for `zb_managed` onboarding.
+/// What ZeroBounce should send on your behalf, for `zb_managed` onboarding,
+/// with [`ZeroBounceWarmup::add_sending_account`].
+///
+/// Deprecated: it cannot carry the documented `company_website`,
+/// `company_description` and `example_email`. Use [`ZbManagedEmailContent`]
+/// with [`ZeroBounceWarmup::add_zb_managed_sending_account`]. The API does not
+/// read `industry` or `website`: `industry` is not sent, and `website` is sent
+/// as `company_website`.
+#[deprecated(
+    note = "use ZbManagedEmailContent with ZeroBounceWarmup::add_zb_managed_sending_account"
+)]
 #[derive(Debug, Clone, Default)]
 pub struct EmailContent {
     /// Any of `transactional`, `newsletter`, `marketing`.
     pub types_of_emails: Vec<String>,
+    /// Not read by the API, so not sent.
     pub industry: Option<String>,
     pub company_name: Option<String>,
+    /// Sent as `company_website`, the field the API reads.
     pub website: Option<String>,
 }
 
-/// When ZeroBounce should send, for `zb_managed` onboarding.
+/// When ZeroBounce should send, for `zb_managed` onboarding, with
+/// [`ZeroBounceWarmup::add_sending_account`].
+///
+/// Deprecated: it cannot carry the documented `weekdays_only` and `timezone`,
+/// or a fractional `timezone_offset` such as 5.5. Use [`ZbManagedSending`] with
+/// [`ZeroBounceWarmup::add_zb_managed_sending_account`]. The API does not apply
+/// a daily limit, so `daily_limit` is not sent.
+#[deprecated(
+    note = "use ZbManagedSending with ZeroBounceWarmup::add_zb_managed_sending_account"
+)]
 #[derive(Debug, Clone, Default)]
 pub struct ManagedSending {
     /// -11 to 14.
     pub timezone_offset: Option<i32>,
     pub warmup_start_date: Option<NaiveDate>,
+    /// Not applied by the API, so not sent.
     pub daily_limit: Option<u32>,
+}
+
+/// The `email_content` of a `zb_managed` sending account: the company context
+/// ZeroBounce uses to write the warmup emails. Each field is sent only when set.
+///
+/// `#[non_exhaustive]`, so a field added later is not a breaking change: start
+/// from `ZbManagedEmailContent::default()` and set the fields you need.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct ZbManagedEmailContent {
+    pub company_name: Option<String>,
+    pub company_website: Option<String>,
+    pub company_description: Option<String>,
+    /// Any of `transactional`, `newsletter`, `marketing`. Not sent when empty.
+    pub types_of_emails: Vec<String>,
+    pub example_email: Option<String>,
+}
+
+/// The `managed_sending` schedule of a `zb_managed` sending account. Each field
+/// is sent only when set. The API cannot read it back or change it later.
+///
+/// `#[non_exhaustive]`, so a field added later is not a breaking change: start
+/// from `ZbManagedSending::default()` and set the fields you need.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct ZbManagedSending {
+    pub weekdays_only: Option<bool>,
+    /// A time zone name, such as `Europe/Bucharest`.
+    pub timezone: Option<String>,
+    /// Hours from UTC, -11.0 to 14.0. Fractional offsets such as 5.5 are allowed.
+    pub timezone_offset: Option<f64>,
+    pub warmup_start_date: Option<NaiveDate>,
 }
 
 const EMAIL_TYPES: [&str; 3] = ["transactional", "newsletter", "marketing"];
@@ -211,7 +265,19 @@ impl ZeroBounceWarmup {
     /// A CSV download, returned as text.
     fn csv(&self, path: &str, query: &HashMap<&str, String>) -> ZBResult<String> {
         let (status, content_type, text) = self.send("GET", path, query, None, &[])?;
-        if text.trim().is_empty() || content_type.to_ascii_lowercase().contains("application/json")
+        // Not a CSV: an empty body, JSON (by content type, or an object or list
+        // whatever the content type) or an HTML page (by content type or body).
+        let trimmed = text.trim();
+        let json_body = (trimmed.starts_with('{') || trimmed.starts_with('['))
+            && matches!(
+                serde_json::from_str::<Value>(trimmed),
+                Ok(Value::Object(_) | Value::Array(_))
+            );
+        if trimmed.is_empty()
+            || content_type.to_ascii_lowercase().contains("application/json")
+            || json_body
+            || crate::utility::http_error::content_type_is_html(&content_type)
+            || crate::utility::http_error::body_looks_like_html(&text)
         {
             return Err(ZBError::api(
                 status,
@@ -283,7 +349,10 @@ impl ZeroBounceWarmup {
     /// `SelfManaged` runs your own mailbox and needs `engagement_rule_id` 0-4.
     /// `ZbManaged` has ZeroBounce provision it and takes `email_content` and
     /// `managed_sending`; a 200 means accepted, and the mailbox is provisioned
-    /// afterwards.
+    /// afterwards. For `zb_managed`, prefer
+    /// [`add_zb_managed_sending_account`](Self::add_zb_managed_sending_account),
+    /// which takes every documented field.
+    #[allow(deprecated)]
     pub fn add_sending_account(
         &self,
         from_address: &str,
@@ -321,56 +390,128 @@ impl ZeroBounceWarmup {
         if let Some(flag) = ignore_conflict {
             body.insert("ignore_conflict".into(), Value::Bool(flag));
         }
+        // The 3.0.0 structs, mapped onto the documented fields: `website` is
+        // the API's `company_website`; `industry` and `daily_limit` are not
+        // read by the API and are dropped. A whole-hour offset stays an integer.
+        #[allow(deprecated)]
         if let Some(content) = email_content {
-            let mut object = Map::new();
-            if !content.types_of_emails.is_empty() {
-                for kind in &content.types_of_emails {
-                    if !EMAIL_TYPES.contains(&kind.as_str()) {
-                        return Err(ZBError::explicit(
-                            "types_of_emails must be transactional, newsletter and/or marketing",
-                        ));
-                    }
-                }
-                object.insert(
-                    "types_of_emails".into(),
-                    Value::Array(
-                        content
-                            .types_of_emails
-                            .iter()
-                            .map(|kind| Value::String(kind.clone()))
-                            .collect(),
-                    ),
-                );
-            }
-            for (key, value) in [
-                ("industry", &content.industry),
-                ("company_name", &content.company_name),
-                ("website", &content.website),
-            ] {
-                if let Some(value) = value {
-                    object.insert(key.into(), Value::String(value.clone()));
-                }
-            }
-            body.insert("email_content".into(), Value::Object(object));
+            let documented = ZbManagedEmailContent {
+                company_name: content.company_name.clone(),
+                company_website: content.website.clone(),
+                types_of_emails: content.types_of_emails.clone(),
+                ..ZbManagedEmailContent::default()
+            };
+            body.insert("email_content".into(), Self::email_content_body(&documented)?);
         }
+        #[allow(deprecated)]
         if let Some(sending) = managed_sending {
-            let mut object = Map::new();
+            let documented = ZbManagedSending {
+                warmup_start_date: sending.warmup_start_date,
+                ..ZbManagedSending::default()
+            };
+            let mut object = Self::managed_sending_body(&documented)?;
             if let Some(offset) = sending.timezone_offset {
-                Self::in_range(offset as i64, -11, 14, "timezone_offset")?;
-                object.insert("timezone_offset".into(), Value::from(offset));
+                Self::in_range(i64::from(offset), -11, 14, "timezone_offset")?;
+                if let Value::Object(map) = &mut object {
+                    map.insert("timezone_offset".into(), Value::from(offset));
+                }
             }
-            if let Some(date) = sending.warmup_start_date {
-                object.insert(
-                    "warmup_start_date".into(),
-                    Value::String(date.format("%F").to_string()),
-                );
-            }
-            if let Some(limit) = sending.daily_limit {
-                object.insert("daily_limit".into(), Value::from(limit));
-            }
-            body.insert("managed_sending".into(), Value::Object(object));
+            body.insert("managed_sending".into(), object);
         }
         self.write("POST", "/sending-accounts", Value::Object(body))
+    }
+
+    /// Add a from-address that ZeroBounce provisions and sends from
+    /// (`zb_managed` onboarding). `POST /sending-accounts`
+    ///
+    /// `email_content` and `managed_sending` are optional and send only the
+    /// fields that are set. A 200 means the request was accepted; the mailbox
+    /// is provisioned afterwards.
+    pub fn add_zb_managed_sending_account(
+        &self,
+        from_address: &str,
+        ignore_conflict: Option<bool>,
+        email_content: Option<&ZbManagedEmailContent>,
+        managed_sending: Option<&ZbManagedSending>,
+    ) -> ZBResult<Option<Value>> {
+        Self::required(from_address, "from_address")?;
+        let mut body = Map::from_iter([
+            ("from_address".into(), Value::String(from_address.into())),
+            (
+                "onboarding_model".into(),
+                Value::String(OnboardingModel::ZbManaged.as_str().into()),
+            ),
+        ]);
+        if let Some(flag) = ignore_conflict {
+            body.insert("ignore_conflict".into(), Value::Bool(flag));
+        }
+        if let Some(content) = email_content {
+            body.insert("email_content".into(), Self::email_content_body(content)?);
+        }
+        if let Some(sending) = managed_sending {
+            body.insert("managed_sending".into(), Self::managed_sending_body(sending)?);
+        }
+        self.write("POST", "/sending-accounts", Value::Object(body))
+    }
+
+    fn email_content_body(content: &ZbManagedEmailContent) -> ZBResult<Value> {
+        let mut object = Map::new();
+        for (key, value) in [
+            ("company_name", &content.company_name),
+            ("company_website", &content.company_website),
+            ("company_description", &content.company_description),
+        ] {
+            if let Some(value) = value {
+                object.insert(key.into(), Value::String(value.clone()));
+            }
+        }
+        if !content.types_of_emails.is_empty() {
+            for kind in &content.types_of_emails {
+                if !EMAIL_TYPES.contains(&kind.as_str()) {
+                    return Err(ZBError::explicit(
+                        "types_of_emails must be transactional, newsletter and/or marketing",
+                    ));
+                }
+            }
+            object.insert(
+                "types_of_emails".into(),
+                Value::Array(
+                    content
+                        .types_of_emails
+                        .iter()
+                        .map(|kind| Value::String(kind.clone()))
+                        .collect(),
+                ),
+            );
+        }
+        if let Some(example) = &content.example_email {
+            object.insert("example_email".into(), Value::String(example.clone()));
+        }
+        Ok(Value::Object(object))
+    }
+
+    fn managed_sending_body(sending: &ZbManagedSending) -> ZBResult<Value> {
+        let mut object = Map::new();
+        if let Some(flag) = sending.weekdays_only {
+            object.insert("weekdays_only".into(), Value::Bool(flag));
+        }
+        if let Some(timezone) = &sending.timezone {
+            object.insert("timezone".into(), Value::String(timezone.clone()));
+        }
+        if let Some(offset) = sending.timezone_offset {
+            // NaN and the infinities fail the range check too.
+            if !(-11.0..=14.0).contains(&offset) {
+                return Err(ZBError::explicit("timezone_offset must be -11.0 to 14.0"));
+            }
+            object.insert("timezone_offset".into(), Value::from(offset));
+        }
+        if let Some(date) = sending.warmup_start_date {
+            object.insert(
+                "warmup_start_date".into(),
+                Value::String(date.format("%F").to_string()),
+            );
+        }
+        Ok(Value::Object(object))
     }
 
     /// Change an account's engagement rule, status and auto-enable flag.

@@ -218,6 +218,17 @@ fn echo_answer(path: &str, key: &str) -> Option<(u16, &'static str, String)> {
     if key.starts_with("echo-400json") {
         return Some((400, "application/json", format!(r#"{{"error":"Invalid API key {inner}"}}"#)));
     }
+    // A 2xx body with a field of the wrong type (a string where the typed
+    // responses read a number, a boolean or a list): serde quotes the value it
+    // could not read in its error, and that error was handed on as it came.
+    if key.starts_with("echo-200typed") {
+        let value = format!(r#""Invalid API key {inner}""#);
+        return Some((
+            200,
+            "application/json",
+            format!(r#"{{"total":{value},"found":{value},"score":{value},"other_domain_formats":{value}}}"#),
+        ));
+    }
     None
 }
 
@@ -2128,6 +2139,23 @@ fn a_body_cut_short_is_an_error_on_every_public_request_method() {
     assert!(leaked.is_empty(), "errors carrying the key: {leaked:?}");
 }
 
+/// Every text an error exposes: its Display and Debug, each error on its
+/// `source()` chain, and the serde error a `JsonError` carries.
+fn error_texts(error: &ZBError) -> Vec<String> {
+    let mut texts = vec![error.to_string(), format!("{error:?}"), format!("{error:#?}")];
+    if let ZBError::JsonError(inner) = error {
+        texts.push(inner.to_string());
+        texts.push(format!("{inner:?}"));
+    }
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        texts.push(cause.to_string());
+        texts.push(format!("{cause:?}"));
+        source = cause.source();
+    }
+    texts
+}
+
 /// No request returns the API key in an error, whatever form of it the
 /// response body echoes: an error-only 200, a {"success": false} 200, a text
 /// 400 quoting the request URL, or a JSON 400. Messages built from a response
@@ -2137,7 +2165,15 @@ fn a_body_cut_short_is_an_error_on_every_public_request_method() {
 fn a_body_that_echoes_the_key_never_puts_it_in_an_error() {
     let (port, fake) = start_fake();
     let mut leaked = Vec::new();
-    let cases = ["echo-200error", "echo-200failure", "echo-400text", "echo-400json", "echo-200message", "echo-200batch"];
+    let cases = [
+        "echo-200error",
+        "echo-200failure",
+        "echo-400text",
+        "echo-400json",
+        "echo-200message",
+        "echo-200batch",
+        "echo-200typed",
+    ];
     for case in cases {
         // '/', '+' and ' ' are encoded, and encoded differently in a query
         // and in a path, so each form differs.
@@ -2155,7 +2191,7 @@ fn a_body_that_echoes_the_key_never_puts_it_in_an_error() {
         let swept = sweep_every_request_method(&zb, &mut |name, result| {
             if let Err(error) = result {
                 failed += 1;
-                let texts = [error.to_string(), format!("{error:?}")];
+                let texts = error_texts(&error);
                 if forms.iter().any(|form| texts.iter().any(|text| text.contains(form.as_str()))) {
                     leaked.push(format!("{case} {name}: {error:?}"));
                 }
@@ -2165,7 +2201,14 @@ fn a_body_that_echoes_the_key_never_puts_it_in_an_error() {
         fake.take();
         // Most calls fail on the first four bodies, a few on the last two; if
         // none did, nothing was checked.
-        let least = if case.starts_with("echo-200message") || case.starts_with("echo-200batch") { 1 } else { swept.len() / 2 };
+        let least = if case.starts_with("echo-200message")
+            || case.starts_with("echo-200batch")
+            || case.starts_with("echo-200typed")
+        {
+            1
+        } else {
+            swept.len() / 2
+        };
         assert!(failed >= least, "{case}: only {failed} of {} calls failed", swept.len());
     }
     assert!(leaked.is_empty(), "{} errors carry the key: {leaked:#?}", leaked.len());
