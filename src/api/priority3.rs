@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Read;
 
 use reqwest::blocking::multipart::{Form, Part};
-use serde_json::{from_str, Value};
+use serde_json::Value;
 
 use serde::Deserialize;
 
@@ -326,7 +326,7 @@ impl ZeroBounce {
             self.url_provider.url_of("/filters/add"),
             HashMap::from([("rule", rule), ("target", target), ("value", value)]),
         )?;
-        Ok(from_str(&body)?)
+        crate::utility::http_error::parse_json_body(&body)
     }
 
     pub fn list_filters(&self, use_post: bool) -> ZBResult<Value> {
@@ -338,7 +338,7 @@ impl ZeroBounce {
         } else {
             self.generic_get_request(self.url_provider.url_of("/filters/list"), HashMap::new())?
         };
-        Ok(from_str(&body)?)
+        crate::utility::http_error::parse_json_body(&body)
     }
 
     pub fn delete_filter(&self, rule: &str, target: &str, value: &str) -> ZBResult<Value> {
@@ -346,7 +346,7 @@ impl ZeroBounce {
             self.url_provider.url_of("/filters/delete"),
             HashMap::from([("rule", rule), ("target", target), ("value", value)]),
         )?;
-        Ok(from_str(&body)?)
+        crate::utility::http_error::parse_json_body(&body)
     }
 
     pub fn list_s3_files(
@@ -367,7 +367,7 @@ impl ZeroBounce {
             }
         }
         let body = self.generic_get_request(url, params)?;
-        Ok(from_str(&body)?)
+        crate::utility::http_error::parse_json_body(&body)
     }
 
     /// Validate a file in your Amazon S3 bucket (POST /validateS3file).

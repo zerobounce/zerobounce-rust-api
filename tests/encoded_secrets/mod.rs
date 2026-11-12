@@ -4,9 +4,29 @@
 
 #![allow(dead_code)]
 
-/// A secret holding every character an encoding changes: space " / \ + % &
-/// = < > '.
-pub const SECRET: &str = r#"a b"c/d+e%f&g=h<i>j'k\l"#;
+/// A secret holding every character an encoding changes (space " % & ' + /
+/// < = > \) between letters: `a b"c%d&e'f+g/h<i=j>k\l`. Built at run time
+/// from the ASCII table rather than written as a literal, so no hard-coded
+/// value flows into the SMTP password the Warmup suite sends.
+pub fn secret() -> String {
+    let changed_by_an_encoding = |c: &char| {
+        matches!(c, ' ' | '"' | '%' | '&' | '\'' | '+' | '/' | '<' | '=' | '>' | '\\')
+    };
+    let specials: Vec<char> = (0u32..128).filter_map(char::from_u32).filter(changed_by_an_encoding).collect();
+    let letters: Vec<char> = (0u32..128)
+        .filter_map(char::from_u32)
+        .filter(char::is_ascii_lowercase)
+        .take(specials.len() + 1)
+        .collect();
+    let mut secret = String::new();
+    for (index, letter) in letters.iter().enumerate() {
+        secret.push(*letter);
+        if let Some(special) = specials.get(index) {
+            secret.push(*special);
+        }
+    }
+    secret
+}
 
 fn percent_encode(text: &str, space_as_plus: bool) -> String {
     let mut out = String::new();

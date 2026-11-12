@@ -211,9 +211,14 @@ impl ZeroBounceWarmup {
         let body = crate::utility::read_limited(
             response,
             max_bytes,
+            status,
             "response body exceeds size limit",
         )
-        .map_err(|error| ZBError::ExplicitError(self.redact(&error.to_string(), secrets)))?;
+        .map_err(|error| match error {
+            // Over the size cap: the server's answer, with its status.
+            ZBError::ApiError { .. } => error,
+            other => ZBError::ExplicitError(self.redact(&other.to_string(), secrets)),
+        })?;
         let text = String::from_utf8_lossy(&body).into_owned();
 
         if (300..400).contains(&status) {

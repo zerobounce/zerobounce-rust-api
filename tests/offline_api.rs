@@ -13,6 +13,7 @@ use zero_bounce::utility::structures::bulk::{
     zb_download_type, ZBBulkResponse, ZBEmailFinderFileOptions, ZBFile, ZBGetFileOptions,
 };
 use zero_bounce::utility::structures::validate_options::ZBValidateOptions;
+use zero_bounce::utility::http_error::UNEXPECTED_JSON_SHAPE_MESSAGE;
 use zero_bounce::api::inbox_placement::{
     CreateInboxPlacementTestOptions, InboxPlacementProviderSelection,
     ListInboxPlacementTestsOptions,
@@ -275,6 +276,22 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
         }
         let quoted = json_escape(&format!("Bad key [{encoded}] end"));
         return (200, "application/json", format!(r#"{{"error":{quoted}}}"#));
+    }
+    // "oversize-<status>-key": a JSON body just over the 16 MiB cap.
+    if let Some(status) = key
+        .strip_prefix("oversize-")
+        .and_then(|rest| rest.split('-').next())
+        .and_then(|status| status.parse::<u16>().ok())
+    {
+        return (status, "application/json", format!(r#"{{"a":"{}"}}"#, "x".repeat(16 << 20)));
+    }
+    // "shape-<n>-key": wrong-shape JSON body n (WRONG_SHAPES), as a JSON 200.
+    if let Some(index) = key
+        .strip_prefix("shape-")
+        .and_then(|rest| rest.split('-').next())
+        .and_then(|index| index.parse::<usize>().ok())
+    {
+        return (200, "application/json", WRONG_SHAPES[index].to_string());
     }
     // "corpus-<n>-key": line n of the strict JSON corpus, as a JSON 200.
     if let Some(index) = key
@@ -2698,17 +2715,19 @@ fn success_false_as_a_string_is_an_error_on_every_call() {
     }
 }
 
-/// `remove_duplicate` is sent only when the caller sets it: the API's
-/// default is true, and the SDK sent `false` unless told otherwise.
+/// `ZBFile` always sends `remove_duplicate`, with the caller's value and
+/// `false` when it is not set: the default every released version (4.0.x and
+/// earlier) sent, kept because changing a released default is a breaking
+/// change (standard.md, the JS, Rust and Pascal exception).
 #[test]
-fn sendfile_sends_remove_duplicate_only_when_set() {
+fn sendfile_always_sends_remove_duplicate_defaulting_to_false() {
     let (port, fake) = start_fake();
     let zb = client(port, "dedupe-key");
     let file = ZBFile::from_content(b"email\na@example.com\n".to_vec());
     zb.bulk_validation_file_submit(&file).unwrap();
-    assert!(!only(&fake).fields.contains_key("remove_duplicate"), "sent though not set");
+    assert_eq!(only(&fake).fields.get("remove_duplicate").map(String::as_str), Some("false"));
     zb.ai_scoring_file_submit(&file).unwrap();
-    assert!(!only(&fake).fields.contains_key("remove_duplicate"), "sent though not set");
+    assert_eq!(only(&fake).fields.get("remove_duplicate").map(String::as_str), Some("false"));
     for flag in [false, true] {
         let file = ZBFile::from_content(b"email\n".to_vec()).set_remove_duplicate(flag);
         zb.bulk_validation_file_submit(&file).unwrap();
@@ -2738,6 +2757,7 @@ fn request_bodies_use_the_documented_field_names() {
             ("api_key", "fields-key"),
             ("file", "<file>"),
             ("has_header_row", "true"),
+            ("remove_duplicate", "false"),
             ("email_address_column", "1"),
             ("return_url", "https://example.com/done"),
         ])
@@ -2774,8 +2794,9 @@ fn request_bodies_use_the_documented_field_names() {
 
 /// Every JSON call (Inbox Placement, list evaluator and the raw-JSON calls
 /// included) rejects every REJECT body of the shared corpus as an ApiError
-/// with status 200, and takes every ACCEPT body as JSON: a result, or the
-/// parse error for JSON that is not the response type, never an ApiError.
+/// with status 200, and takes every ACCEPT body as JSON: a result, or, for
+/// JSON that is not the response type, the status-200 ApiError reading
+/// UNEXPECTED_JSON_SHAPE_MESSAGE -- never a text or "not valid JSON" error.
 /// An empty body is a success on the Inbox Placement delete only.
 #[test]
 fn every_json_call_follows_the_strict_json_corpus() {
@@ -2792,7 +2813,8 @@ fn every_json_call_follows_the_strict_json_corpus() {
             let verdict = if *accept { "ACCEPT" } else { "REJECT" };
             match (accept, &result) {
                 (true, Ok(_)) => {}
-                (true, Err(error)) if !matches!(error, ZBError::ApiError { .. }) => {}
+                (true, Err(error @ ZBError::ApiError { .. }))
+                    if error.status_code() == Some(200) && error.to_string() == UNEXPECTED_JSON_SHAPE_MESSAGE => {}
                 (false, Ok(_)) if body.is_empty() && name == "delete_inbox_placement_test" => {}
                 (false, Err(error @ ZBError::ApiError { .. })) if error.status_code() == Some(200) => {}
                 _ => wrong.push(format!("{verdict} {body:?} {name}: {result:?}")),
@@ -2822,7 +2844,7 @@ fn every_encoding_of_the_key_is_kept_out_of_every_error() {
             scope.spawn(move || {
                 let sequences = encoded_secrets::sequences();
                 for (index, shape) in chunk {
-                    let key = format!("enc-{index}-{shape}-{}", encoded_secrets::SECRET);
+                    let key = format!("enc-{index}-{shape}-{}", encoded_secrets::secret());
                     let results = sweep_with_key(port, &key);
                     let mut failed = 0;
                     for (name, result) in &results {
@@ -2846,4 +2868,52 @@ fn every_encoding_of_the_key_is_kept_out_of_every_error() {
     fake.take();
     let leaked = leaked.into_inner().unwrap();
     assert!(leaked.is_empty(), "{} errors leak the key: {:#?}", leaked.len(), &leaked[..leaked.len().min(5)]);
+}
+
+/// Strict JSON bodies of the wrong shape for every typed call.
+const WRONG_SHAPES: [&str; 6] = ["null", " null ", "0", "true", "\"x\"", "[1]"];
+
+/// A 2xx body that is strict JSON but the wrong shape for the call is an
+/// ApiError with status 200 on every typed call: never a result, a
+/// `JsonError`/`ExplicitError`/`IntParseError`, or an error without status.
+/// A call that takes `"x"` as its result returns raw JSON and is skipped.
+#[test]
+fn every_typed_call_refuses_json_of_the_wrong_shape() {
+    let (port, _fake) = start_fake();
+    let downloads = download_methods(port);
+    let raw: BTreeSet<&str> = sweep_with_key(port, "shape-4-key")
+        .into_iter()
+        .filter(|(_, result)| result.is_ok())
+        .map(|(name, _)| name)
+        .collect();
+    let mut wrong = Vec::new();
+    let mut typed = BTreeSet::new();
+    for (index, shape) in WRONG_SHAPES.iter().enumerate() {
+        for (name, result) in sweep_with_key(port, &format!("shape-{index}-key")) {
+            if downloads.contains(name) || raw.contains(name) {
+                continue;
+            }
+            typed.insert(name);
+            match &result {
+                Err(error @ ZBError::ApiError { .. })
+                    if error.status_code() == Some(200) && error.to_string() == UNEXPECTED_JSON_SHAPE_MESSAGE => {}
+                _ => wrong.push(format!("{shape:?} {name}: {result:?}")),
+            }
+        }
+    }
+    assert!(typed.len() >= 30, "only {} typed calls: {typed:?}", typed.len());
+    assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
+}
+
+/// A body over the 16 MiB JSON cap is the server's answer: an ApiError that
+/// keeps the response's status (a 500 stays 500, a 200 is status 200).
+#[test]
+fn a_body_over_the_size_cap_keeps_its_status() {
+    let (port, _fake) = start_fake();
+    for status in [200u16, 500] {
+        let error = client(port, &format!("oversize-{status}-key")).get_credits().unwrap_err();
+        assert!(matches!(error, ZBError::ApiError { .. }), "{status}: {error:?}");
+        assert_eq!(error.status_code(), Some(status), "{error:?}");
+        assert_eq!(error.to_string(), "response body exceeds size limit");
+    }
 }

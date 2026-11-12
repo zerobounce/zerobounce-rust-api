@@ -1464,7 +1464,7 @@ fn every_encoding_of_a_warmup_secret_is_kept_out_of_every_error() {
     let mut leaked = Vec::new();
     for (index, sequence) in encoded_secrets::sequences().iter().enumerate() {
         for shape in ["t", "j"] {
-            let key = format!("enc-{index}-{shape}-{}", encoded_secrets::SECRET);
+            let key = format!("enc-{index}-{shape}-{}", encoded_secrets::secret());
             let zb = ZeroBounceWarmup::with_base_url(&key, &format!("http://127.0.0.1:{port}")).unwrap();
             let mut failed = 0;
             sweep_every_warmup_method(&zb, &mut |name, result| {
@@ -1481,8 +1481,8 @@ fn every_encoding_of_a_warmup_secret_is_kept_out_of_every_error() {
         }
         // The SMTP password and username, echoed by the one SMTP test call.
         let zb = client(port);
-        let password = format!("{}{}", test_password(), encoded_secrets::SECRET);
-        let username = format!("user {}", encoded_secrets::SECRET);
+        let password = format!("{}{}", test_password(), encoded_secrets::secret());
+        let username = format!("user {}", encoded_secrets::secret());
         for secret in [&password, &username] {
             fake.reply_with(400, "text/plain", &format!("Bad login [{}] end", encoded_secrets::apply(sequence, secret)));
             let error = zb
@@ -1496,4 +1496,20 @@ fn every_encoding_of_a_warmup_secret_is_kept_out_of_every_error() {
         }
     }
     assert!(leaked.is_empty(), "{} errors leak a secret: {:#?}", leaked.len(), &leaked[..leaked.len().min(5)]);
+}
+
+/// A body over the 16 MiB JSON cap keeps the response's status: an ApiError
+/// with 200 or 500, not an ExplicitError without one.
+#[test]
+fn a_body_over_the_size_cap_keeps_its_status() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    for status in [200u16, 500] {
+        let body = format!(r#"{{"a":"{}"}}"#, "x".repeat(16 << 20));
+        *fake.reply.lock().unwrap() = Some((status, "application/json".to_string(), body));
+        let error = zb.get_seed_count().unwrap_err();
+        assert!(matches!(error, ZBError::ApiError { .. }), "{status}: {error:?}");
+        assert_eq!(error.status_code(), Some(status), "{error:?}");
+        assert_eq!(error.to_string(), "response body exceeds size limit");
+    }
 }

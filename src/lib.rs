@@ -221,6 +221,7 @@ impl ZeroBounce {
         let body = utility::read_limited(
             response,
             utility::MAX_JSON_RESPONSE_BYTES,
+            status,
             "response body exceeds size limit",
         )?;
         Ok((status, content_type, String::from_utf8_lossy(&body).into_owned()))

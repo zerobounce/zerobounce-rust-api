@@ -144,11 +144,15 @@ pub(crate) fn redact_secrets(text: &str, secrets: &[&str]) -> String {
 pub(crate) const CREDENTIAL_OMITTED_MESSAGE: &str =
     "ZeroBounce's response was omitted from this error because it contained a credential.";
 
-/// Whether any view of `text`, decoded up to three layers deep in any order
+/// How deep [`secret_survives_decoding`] decodes: the SDK's own request
+/// encoding plus three layers a server or proxy may echo it in.
+const MAX_SECRET_DECODE_LAYERS: usize = 4;
+
+/// Whether any view of `text`, decoded up to [`MAX_SECRET_DECODE_LAYERS`] layers deep in any order
 /// (percent-decoding, percent-decoding with `+` as a space, JSON-unescaping
 /// with `\/` and `\uXXXX`), contains a secret. `secret_forms` masks the
 /// spellings this crate can generate; this catches every other one (lowercase
-/// percent escapes, a third layer, another JSON escaper).
+/// percent escapes, another JSON escaper).
 fn secret_survives_decoding(text: &str, secrets: &[&str]) -> bool {
     let secrets: Vec<&str> = secrets.iter().copied().filter(|secret| !secret.is_empty()).collect();
     if secrets.is_empty() {
@@ -162,13 +166,13 @@ fn secret_survives_decoding(text: &str, secrets: &[&str]) -> bool {
     let mut seen = std::collections::HashSet::new();
     seen.insert(text.to_string());
     let mut views = vec![text.to_string()];
-    for layer in 0..=3 {
+    for layer in 0..=MAX_SECRET_DECODE_LAYERS {
         let mut next = Vec::new();
         for view in &views {
             if secrets.iter().any(|secret| view.contains(secret)) {
                 return true;
             }
-            if layer == 3 {
+            if layer == MAX_SECRET_DECODE_LAYERS {
                 continue;
             }
             for decode in decoders {
@@ -329,8 +333,8 @@ fn client_or_error(
 mod redaction_tests {
     use super::redact_secrets;
 
-    /// Redaction is closed under encoding: every sequence of up to three
-    /// encodings of a secret (URL with %20 or +, JSON with or without \/),
+    /// Redaction is closed under encoding: every sequence of up to four
+    /// encodings of a secret (the SDK's own plus three echoes) (URL with %20 or +, JSON with or without \/),
     /// then a seeded random sample of them with lowercase percent escapes and
     /// random surrounding text, leaves no decoded view holding the secret. A
     /// spelling `secret_forms` does not generate drops the whole message.
@@ -345,7 +349,7 @@ mod redaction_tests {
             |text| super::json_escaped(text, true),
         ];
         let mut sequences: Vec<Vec<usize>> = vec![vec![]];
-        for depth in 1..=3 {
+        for depth in 1..=4 {
             let mut next = Vec::new();
             for prefix in sequences.iter().filter(|s| s.len() == depth - 1) {
                 for encoder in 0..encoders.len() {
@@ -356,7 +360,7 @@ mod redaction_tests {
             }
             sequences.extend(next);
         }
-        assert_eq!(sequences.len(), 85);
+        assert_eq!(sequences.len(), 341);
         // A small LCG, seeded, for the random sample.
         let mut state: u64 = 20261112;
         let mut random = |below: usize| {
@@ -368,7 +372,7 @@ mod redaction_tests {
         let mut cases: Vec<Case> =
             sequences.iter().map(|sequence| (sequence.clone(), false, String::new())).collect();
         for _ in 0..500 {
-            let sequence = (0..random(4)).map(|_| random(encoders.len())).collect();
+            let sequence = (0..random(5)).map(|_| random(encoders.len())).collect();
             cases.push((sequence, random(2) == 0, format!("{{\"x\":{}}} \"q\"", random(1000))));
         }
         let mut omitted = 0;
@@ -387,7 +391,7 @@ mod redaction_tests {
                     omitted += 1;
                 }
                 let mut views = vec![got.clone()];
-                for _ in 0..3 {
+                for _ in 0..4 {
                     let mut next = Vec::new();
                     for view in &views {
                         next.push(super::percent_decoded(view, false));
@@ -681,16 +685,20 @@ pub const MAX_JSON_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_GETFILE_BYTES: usize = 256 * 1024 * 1024;
 
 /// Stop reading after one byte past the cap, so an oversized response cannot
-/// consume unbounded memory before the caller checks its length.
+/// consume unbounded memory before the caller checks its length. A body over
+/// the cap is the server's answer, so it keeps the response's HTTP status: a
+/// [`ZBError::ApiError`] with `status` (a 500 stays 500, a 200 is an API
+/// error with status 200).
 pub(crate) fn read_limited(
     mut reader: impl Read,
     max_bytes: usize,
+    status: u16,
     message: &str,
 ) -> ZBResult<Vec<u8>> {
     let mut body = Vec::new();
     reader.by_ref().take(max_bytes as u64 + 1).read_to_end(&mut body)?;
     if body.len() > max_bytes {
-        return Err(ZBError::explicit(message));
+        return Err(ZBError::api(status, message));
     }
     Ok(body)
 }
@@ -721,14 +729,15 @@ mod response_limit_tests {
             remaining: 10_000,
             read: 0,
         };
-        let error = read_limited(&mut source, 32, "too large").unwrap_err();
+        let error = read_limited(&mut source, 32, 500, "too large").unwrap_err();
         assert_eq!(error.to_string(), "too large");
+        assert_eq!(error.status_code(), Some(500));
         assert_eq!(source.read, 33);
     }
 
     #[test]
     fn accepts_body_at_limit() {
-        let body = read_limited(&b"exact"[..], 5, "too large").unwrap();
+        let body = read_limited(&b"exact"[..], 5, 200, "too large").unwrap();
         assert_eq!(body, b"exact");
     }
 }
@@ -853,19 +862,27 @@ pub const SS_AI_AGENT_MAILBOX: &str = "ai_agent_mailbox";
 #[non_exhaustive]
 pub enum ZBError {
     /// An error the SDK raised itself: an invalid argument or URL caught before
-    /// a request, or a 2xx response body it could not read.
+    /// a request, or a local failure such as a file that cannot be written.
     ExplicitError(String),
     /// The API answered and the answer is a failure: a non-2xx status, an HTML
     /// error page, an error body on an HTTP 200, a bulk `getfile` error, or a
     /// `batch_validate` account-level error. `status` is the HTTP status of that
     /// response, so callers can tell a 403 from Cloudflare apart from a 400/404
-    /// from the API and a 429 from the Warmup rate limit. Both the validation
-    /// client and the Warmup client return it.
+    /// from the API and a 429 from the Warmup rate limit. A 2xx body that is
+    /// not strict JSON, or is JSON of the wrong shape for the call (`0`,
+    /// `"x"`, `null`, a list where an object is expected, a field of the wrong
+    /// type), is an `ApiError` with status 200. Both the validation client and
+    /// the Warmup client return it.
     ApiError { status: u16, message: String },
-    /// A 2xx body that could not be read as the expected type. The inner
-    /// error names only the kind of error and its line and column, never the
-    /// body's content (serde's own message quotes the value it rejected).
+    /// A `serde_json::Error` converted with `From` (`?`). The SDK's own calls
+    /// no longer return it: a 2xx body of the wrong shape is an
+    /// [`ZBError::ApiError`] with status 200. Kept for code that converts its
+    /// own serde errors. The inner error names only the kind of error and its
+    /// line and column, never the input (serde's own message quotes the value
+    /// it rejected).
     JsonError(serde_json::Error),
+    /// The SDK's own calls no longer return it: an unreadable `Credits` value
+    /// is an [`ZBError::ApiError`] with status 200. Kept for compatibility.
     IntParseError(std::num::ParseIntError),
     RequestError(reqwest::Error),
     IOError(IOError),
@@ -899,9 +916,9 @@ impl ZBError {
 
     /// The HTTP status of a failed API response: `Some` for every
     /// [`ZBError::ApiError`], including a failure the API reports with an HTTP
-    /// 200. `None` when no failed response is involved: an argument or URL
-    /// rejected before a request, a transport error, or a 2xx body that could
-    /// not be parsed.
+    /// 200 and a 2xx body that is not JSON or not the call's shape (`Some(200)`).
+    /// `None` when no response is involved: an argument or URL rejected before
+    /// a request, or a transport error.
     pub fn status_code(&self) -> Option<u16> {
         match self {
             ZBError::ApiError { status, .. } => Some(*status),

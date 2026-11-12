@@ -265,9 +265,19 @@ pub fn reject_message_only_body(status: u16, content_type: &str, body: &str) -> 
     Ok(())
 }
 
+/// The message for a 2xx body that is valid JSON but not the shape the call
+/// returns (`0`, `"x"`, `null`, a list where an object is expected, a field of
+/// the wrong type).
+pub const UNEXPECTED_JSON_SHAPE_MESSAGE: &str =
+    "ZeroBounce returned JSON that is not the expected response.";
+
+/// Parse a 2xx body the caller has already checked
+/// ([`ensure_json_api_body`]) as the call's result type. A body that does not
+/// fit is the API's answer, not a transport or SDK error: a
+/// [`ZBError::ApiError`] with status 200 and [`UNEXPECTED_JSON_SHAPE_MESSAGE`].
+/// The message carries no body content.
 pub fn parse_json_body<T: serde::de::DeserializeOwned>(body: &str) -> ZBResult<T> {
-    serde_json::from_str(body)
-        .map_err(|_| ZBError::explicit("ZeroBounce returned a response that is not valid JSON."))
+    serde_json::from_str(body).map_err(|_| ZBError::api(200, UNEXPECTED_JSON_SHAPE_MESSAGE))
 }
 
 #[cfg(test)]

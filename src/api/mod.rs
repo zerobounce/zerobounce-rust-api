@@ -6,7 +6,6 @@ pub mod validation;
 use std::collections::HashMap;
 
 use chrono::{NaiveDate, Utc};
-use serde_json::from_str;
 
 pub use crate::ZeroBounce;
 use crate::utility::structures::generic::{FindEmailResponse, FindEmailResponseV2, DomainSearchResponseV2};
@@ -64,13 +63,15 @@ pub struct DomainSearchV2Builder<'a> {
 
 impl ZeroBounce {
 
+    /// The `Credits` value of a 2xx body. A body without a `Credits` string
+    /// holding a whole number is JSON of the wrong shape: a
+    /// [`ZBError::ApiError`] with status 200, like on every other call.
     fn get_credits_from_string(string_value: String) -> ZBResult<i64> {
-        from_str::<serde_json::Value>(string_value.as_ref())?
+        crate::utility::http_error::parse_json_body::<serde_json::Value>(&string_value)?
             .get("Credits")
             .and_then(serde_json::Value::as_str)
-            .map(str::parse::<i64>)
-            .ok_or(ZBError::explicit("credits value not in json"))?
-            .map_err(ZBError::IntParseError)
+            .and_then(|credits| credits.parse::<i64>().ok())
+            .ok_or_else(|| ZBError::api(200, crate::utility::http_error::UNEXPECTED_JSON_SHAPE_MESSAGE))
     }
 
     pub fn get_credits(&self) -> ZBResult<i64> {
@@ -95,7 +96,7 @@ impl ZeroBounce {
             self.url_provider.url_of(ENDPOINT_API_USAGE), query_args
         )?;
 
-        let api_usage = from_str::<ApiUsage>(&response_content)?;
+        let api_usage = crate::utility::http_error::parse_json_body::<ApiUsage>(&response_content)?;
         Ok(api_usage)
     }
 
@@ -114,7 +115,7 @@ impl ZeroBounce {
             self.url_provider.url_of(ENDPOINT_ACTIVITY_DATA), query_args
         )?;
 
-        let activity_data = from_str::<ActivityData>(&response_content)?;
+        let activity_data = crate::utility::http_error::parse_json_body::<ActivityData>(&response_content)?;
         Ok(activity_data)
     }
 
@@ -126,7 +127,7 @@ impl ZeroBounce {
             query_args,
         )?;
 
-        let score = from_str::<ScoreEmailResponse>(&response_content)?;
+        let score = crate::utility::http_error::parse_json_body::<ScoreEmailResponse>(&response_content)?;
         Ok(score)
     }
 
@@ -138,7 +139,7 @@ impl ZeroBounce {
             form_args,
         )?;
 
-        let score = from_str::<ScoreEmailResponse>(&response_content)?;
+        let score = crate::utility::http_error::parse_json_body::<ScoreEmailResponse>(&response_content)?;
         Ok(score)
     }
 
@@ -167,7 +168,7 @@ impl ZeroBounce {
             self.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
 
-        let activity_data = from_str::<FindEmailResponse>(&response_content)?;
+        let activity_data = crate::utility::http_error::parse_json_body::<FindEmailResponse>(&response_content)?;
         Ok(activity_data)
     }
 
@@ -349,7 +350,7 @@ impl<'a> FindEmailV2Builder<'a> {
             self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
 
-        let find_email_response = from_str::<FindEmailResponseV2>(&response_content)?;
+        let find_email_response = crate::utility::http_error::parse_json_body::<FindEmailResponseV2>(&response_content)?;
         Ok(find_email_response)
     }
 }
@@ -403,7 +404,7 @@ impl<'a> DomainSearchV2Builder<'a> {
             self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args
         )?;
 
-        let domain_search_response = from_str::<DomainSearchResponseV2>(&response_content)?;
+        let domain_search_response = crate::utility::http_error::parse_json_body::<DomainSearchResponseV2>(&response_content)?;
         Ok(domain_search_response)
     }
 }

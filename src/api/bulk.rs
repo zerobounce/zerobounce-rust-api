@@ -106,6 +106,7 @@ impl ZeroBounce {
         let body_bytes = crate::utility::read_limited(
             response,
             crate::utility::MAX_GETFILE_BYTES,
+            status.as_u16(),
             "getfile response exceeds size limit",
         )?;
         let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
