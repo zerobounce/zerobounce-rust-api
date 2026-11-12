@@ -37,9 +37,21 @@ pub(crate) fn redacted_key(api_key: &str) -> &'static str {
 /// send it to another host). If it cannot be built there is no fallback: a
 /// default client would follow redirects.
 pub(crate) fn http_client() -> ZBResult<reqwest::blocking::Client> {
+    http_client_with_timeout(REQUEST_TIMEOUT)
+}
+
+/// How long one request may take, from connecting to the last byte of the
+/// body.
+pub(crate) const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// [`http_client`] with another timeout, so a test can prove the timeout holds
+/// without waiting two minutes.
+fn http_client_with_timeout(
+    timeout: std::time::Duration,
+) -> ZBResult<reqwest::blocking::Client> {
     client_or_error(
         reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(timeout)
             .redirect(reqwest::redirect::Policy::none())
             .build(),
     )
@@ -53,7 +65,94 @@ fn client_or_error(
 
 #[cfg(test)]
 mod http_client_tests {
-    use super::{client_or_error, ZBError};
+    use super::{client_or_error, http_client_with_timeout, ZBError, REQUEST_TIMEOUT};
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn the_request_timeout_is_two_minutes() {
+        assert_eq!(REQUEST_TIMEOUT, Duration::from_secs(120));
+    }
+
+    /// A server that accepts the request and never answers. Without a
+    /// timeout the call would hang for ever; the test gives up after 20
+    /// seconds and fails instead.
+    #[test]
+    fn a_server_that_never_answers_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for mut stream in listener.incoming().flatten() {
+                let mut buffer = [0u8; 4096];
+                let _ = stream.read(&mut buffer);
+                held.push(stream);
+            }
+        });
+        let client = http_client_with_timeout(Duration::from_millis(300)).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let result = client.get(format!("http://127.0.0.1:{port}/v2/getcredits")).send();
+            let _ = sender.send((result.map(|response| response.status()), started.elapsed()));
+        });
+        let (result, elapsed) = receiver
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the request was still waiting after 20 s: the client has no timeout");
+        let error = result.expect_err("a server that never answered gave a response");
+        assert!(error.is_timeout(), "{error}");
+        assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
+    }
+
+    /// Both API clients get their reqwest client from `http_client`, so the
+    /// timeout and the redirect policy reach every request. A client built
+    /// anywhere else in `src/` would skip them.
+    #[test]
+    fn every_http_client_is_built_by_http_client() {
+        fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    rust_files(&path, found);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    found.push(path);
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&src, &mut files);
+        assert!(files.len() > 5, "no Rust sources under {}", src.display());
+        let mut found = Vec::new();
+        for file in files {
+            let source = std::fs::read_to_string(&file).unwrap();
+            // This file is the one place a client is built (and its tests
+            // build one more to get a builder error).
+            if file.ends_with("utility/mod.rs") {
+                continue;
+            }
+            for (number, line) in source.lines().enumerate() {
+                let code = line.trim_start();
+                if code.starts_with("//") {
+                    continue;
+                }
+                for pattern in [
+                    "Client::new(",
+                    "Client::builder(",
+                    "Client::default(",
+                    "ClientBuilder::new(",
+                    "blocking::get(",
+                ] {
+                    if code.contains(pattern) {
+                        found.push(format!("{}:{}: {code}", file.display(), number + 1));
+                    }
+                }
+            }
+        }
+        assert!(found.is_empty(), "HTTP clients built outside http_client: {found:#?}");
+    }
 
     /// A builder failure used to fall back to `Client::default()`, which
     /// follows redirects. It is now an error.

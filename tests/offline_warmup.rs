@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -26,6 +28,9 @@ struct Fake {
     reply: Mutex<Option<(u16, String, String)>>,
     /// A Location header for the next reply only.
     location: Mutex<Option<String>>,
+    /// Added to the Content-Length the fake announces. The body itself is
+    /// sent whole, so a non-zero value is a response cut short.
+    extra_length: AtomicUsize,
 }
 
 impl Fake {
@@ -132,11 +137,21 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                 });
 
                 let (status, content_type, payload) =
-                    fake.reply.lock().unwrap().take().unwrap_or((
-                        200,
-                        "application/json".to_string(),
-                        format!(r#"{{"ok":true,"echo_api_key":"{api_key}"}}"#),
-                    ));
+                    fake.reply.lock().unwrap().take().unwrap_or_else(|| {
+                        if path.ends_with("/download") {
+                            (
+                                200,
+                                "text/csv".to_string(),
+                                "seed,provider\na@b.com,gmail\n".to_string(),
+                            )
+                        } else {
+                            (
+                                200,
+                                "application/json".to_string(),
+                                format!(r#"{{"ok":true,"echo_api_key":"{api_key}"}}"#),
+                            )
+                        }
+                    });
                 let location = fake
                     .location
                     .lock()
@@ -146,7 +161,7 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                     .unwrap_or_default();
                 let response = format!(
                     "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\n{location}Content-Length: {}\r\nConnection: close\r\n\r\n",
-                    payload.len()
+                    payload.len() + fake.extra_length.load(Ordering::SeqCst)
                 );
                 let _ = stream.write_all(response.as_bytes());
                 let _ = stream.write_all(payload.as_bytes());
@@ -163,6 +178,7 @@ fn start_fake() -> (u16, Arc<Fake>) {
         records: Mutex::new(Vec::new()),
         reply: Mutex::new(None),
         location: Mutex::new(None),
+        extra_length: AtomicUsize::new(0),
     });
     let shared = fake.clone();
     thread::spawn(move || {
@@ -738,4 +754,134 @@ fn debug_output_redacts_the_key() {
         assert!(printed.contains("***"), "{printed}");
         assert!(printed.contains("https://warmup-api.zerobounce.net"), "{printed}");
     }
+}
+
+// -- every request method ----------------------------------------------------
+
+/// Calls every public request method of `ZeroBounceWarmup` with arguments that
+/// pass its own checks, hands each result (its value as Debug text) to
+/// `check`, and returns the names it called.
+fn sweep_every_warmup_method(
+    zb: &ZeroBounceWarmup,
+    check: &mut dyn FnMut(&'static str, Result<String, ZBError>),
+) -> Vec<&'static str> {
+    let mut swept = Vec::new();
+    macro_rules! sweep {
+        ($name:literal, $call:expr) => {{
+            check($name, $call.map(|value| format!("{value:?}")));
+            swept.push($name);
+        }};
+    }
+    let address = "a@b.com";
+    sweep!("list_sending_accounts", zb.list_sending_accounts());
+    sweep!("get_sending_account", zb.get_sending_account(address));
+    sweep!(
+        "add_sending_account",
+        zb.add_sending_account(address, OnboardingModel::SelfManaged, Some(0), None, None, None)
+    );
+    sweep!("update_sending_account", zb.update_sending_account(address, 1, 4, true));
+    sweep!("delete_sending_account", zb.delete_sending_account(address));
+    sweep!("change_from_address", zb.change_from_address(address, "c@d.com"));
+    sweep!("list_from_addresses", zb.list_from_addresses(None, None, None));
+    sweep!("get_engagement_rules", zb.get_engagement_rules());
+    sweep!("set_engagement_rule", zb.set_engagement_rule(address, 2));
+    sweep!("get_custom_engagement", zb.get_custom_engagement(address));
+    sweep!("create_custom_engagement", zb.create_custom_engagement(address, 10, 10, 5));
+    sweep!("update_custom_engagement", zb.update_custom_engagement(address, 10, 10, 5));
+    sweep!("delete_custom_engagement", zb.delete_custom_engagement(address, 1));
+    sweep!("get_seeds", zb.get_seeds());
+    sweep!("download_seeds", zb.download_seeds());
+    sweep!("get_seed_count", zb.get_seed_count());
+    sweep!("get_progress_today", zb.get_progress_today());
+    sweep!("get_sent_today", zb.get_sent_today());
+    sweep!("get_emails_per_day", zb.get_emails_per_day());
+    sweep!("get_statistics", zb.get_statistics(address));
+    sweep!(
+        "get_statistics_per_day",
+        zb.get_statistics_per_day(address, date("2026-01-01"), date("2026-01-02"))
+    );
+    sweep!("get_statistics_detailed", zb.get_statistics_detailed(address));
+    sweep!("download_statistics", zb.download_statistics(address));
+    sweep!("get_from_address_statistics", zb.get_from_address_statistics(address));
+    sweep!("check_domain_dmarc", zb.check_domain_dmarc(address, None));
+    sweep!(
+        "test_smtp_configuration",
+        zb.test_smtp_configuration(address, "u", &test_password(), "smtp.example.com", 587)
+    );
+    swept
+}
+
+/// The name of every `pub fn` in the `impl ZeroBounceWarmup` block of
+/// `src/warmup.rs`, read from the source, so a method added later is in this
+/// list without anyone remembering to add it.
+fn public_warmup_request_methods() -> BTreeSet<String> {
+    let root = std::env::var("CARGO_MANIFEST_DIR")
+        .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
+    let source = std::fs::read_to_string(std::path::Path::new(&root).join("src/warmup.rs")).unwrap();
+    let mut names = BTreeSet::new();
+    let mut in_impl = false;
+    for line in source.lines() {
+        if line.starts_with("impl ZeroBounceWarmup") {
+            in_impl = true;
+            continue;
+        }
+        if in_impl && line.starts_with('}') {
+            in_impl = false;
+            continue;
+        }
+        if let (true, Some(signature)) = (in_impl, line.trim_start().strip_prefix("pub fn ")) {
+            let name: String = signature
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if name != "new" && name != "with_base_url" {
+                names.insert(name);
+            }
+        }
+    }
+    assert!(names.len() > 20, "found only {names:?} in src/warmup.rs");
+    names
+}
+
+/// A response cut short (the connection closes before the announced
+/// Content-Length arrives) is an error on every Warmup method, JSON calls and
+/// CSV downloads alike, even though the bytes that did arrive are a complete
+/// success body.
+#[test]
+fn a_body_cut_short_is_an_error_on_every_warmup_method() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+
+    // Control: with an honest Content-Length every call succeeds on the same
+    // body, so the errors below come from the truncation alone.
+    let mut failed = Vec::new();
+    let swept = sweep_every_warmup_method(&zb, &mut |name, result| {
+        if let Err(error) = result {
+            failed.push(format!("{name}: {error}"));
+        }
+    });
+    assert!(failed.is_empty(), "these fail on a whole body too: {failed:#?}");
+
+    fake.extra_length.store(1000, Ordering::SeqCst);
+    let mut accepted = Vec::new();
+    let mut leaked = Vec::new();
+    sweep_every_warmup_method(&zb, &mut |name, result| match result {
+        Ok(value) => accepted.push(format!("{name}: {value}")),
+        Err(error) => {
+            if error.to_string().contains("warmup-key") || format!("{error:?}").contains("warmup-key") {
+                leaked.push(name);
+            }
+        }
+    });
+    fake.extra_length.store(0, Ordering::SeqCst);
+    assert!(accepted.is_empty(), "a body cut short was accepted: {accepted:#?}");
+    assert!(leaked.is_empty(), "errors carrying the key: {leaked:?}");
+
+    // The guard: a Warmup method missing from the sweep fails here.
+    let swept: BTreeSet<String> = swept.into_iter().map(String::from).collect();
+    let defined = public_warmup_request_methods();
+    let missing: Vec<&String> = defined.difference(&swept).collect();
+    let unknown: Vec<&String> = swept.difference(&defined).collect();
+    assert!(missing.is_empty(), "Warmup methods the sweep does not call: {missing:?}");
+    assert!(unknown.is_empty(), "swept names with no `pub fn` in src/warmup.rs: {unknown:?}");
 }
