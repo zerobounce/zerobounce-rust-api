@@ -1,3 +1,5 @@
+mod encoded_secrets;
+
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -232,9 +234,55 @@ fn echo_answer(path: &str, key: &str) -> Option<(u16, &'static str, String)> {
     None
 }
 
+/// The shared strict JSON corpus: (accept, body) for each line of
+/// tests/fixtures/strict-json-corpus.tsv, a byte-identical copy of
+/// sdk-docs/skills/zerobounce-sdk/references/strict-json-corpus.tsv (check
+/// E7). Copy it again when that file changes; do not edit it here. Each line
+/// is a verdict, a tab and a JSON-encoded string whose value is the body.
+fn strict_json_corpus() -> &'static Vec<(bool, String)> {
+    static CORPUS: std::sync::OnceLock<Vec<(bool, String)>> = std::sync::OnceLock::new();
+    CORPUS.get_or_init(|| {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/strict-json-corpus.tsv");
+        let text = std::fs::read_to_string(path).unwrap();
+        let bodies: Vec<(bool, String)> = text
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let (verdict, encoded) = line.split_once('\t').unwrap_or_else(|| panic!("corpus line {line:?}"));
+                assert!(verdict == "ACCEPT" || verdict == "REJECT", "corpus line {line:?}");
+                (verdict == "ACCEPT", serde_json::from_str::<String>(encoded).unwrap())
+            })
+            .collect();
+        let accepted = bodies.iter().filter(|(accept, _)| *accept).count();
+        assert!(accepted >= 5 && bodies.len() - accepted >= 30, "corpus has {} lines", bodies.len());
+        bodies
+    })
+}
+
 fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
     if let Some(echo) = echo_answer(path, key) {
         return echo;
+    }
+    // "enc-<n>-<t|j>-…": the whole key wrapped in encoding sequence n, quoted
+    // in a 400 text body (t) or a 200 JSON error (j).
+    if let Some(rest) = key.strip_prefix("enc-") {
+        let mut parts = rest.splitn(3, '-');
+        let index: usize = parts.next().unwrap().parse().unwrap();
+        let shape = parts.next().unwrap();
+        let encoded = encoded_secrets::apply(&encoded_secrets::sequences()[index], key);
+        if shape == "t" {
+            return (400, "text/plain", format!("Bad key [{encoded}] end"));
+        }
+        let quoted = json_escape(&format!("Bad key [{encoded}] end"));
+        return (200, "application/json", format!(r#"{{"error":{quoted}}}"#));
+    }
+    // "corpus-<n>-key": line n of the strict JSON corpus, as a JSON 200.
+    if let Some(index) = key
+        .strip_prefix("corpus-")
+        .and_then(|rest| rest.split('-').next())
+        .and_then(|index| index.parse::<usize>().ok())
+    {
+        return (200, "application/json", strict_json_corpus()[index].1.clone());
     }
     let page = html_page();
     if key.starts_with("html-403-") {
@@ -2722,4 +2770,80 @@ fn request_bodies_use_the_documented_field_names() {
     assert_eq!(only(&fake).fields, filter);
     zb.delete_filter("exclude", "domain", "example.com").unwrap();
     assert_eq!(only(&fake).fields, filter);
+}
+
+/// Every JSON call (Inbox Placement, list evaluator and the raw-JSON calls
+/// included) rejects every REJECT body of the shared corpus as an ApiError
+/// with status 200, and takes every ACCEPT body as JSON: a result, or the
+/// parse error for JSON that is not the response type, never an ApiError.
+/// An empty body is a success on the Inbox Placement delete only.
+#[test]
+fn every_json_call_follows_the_strict_json_corpus() {
+    let (port, _fake) = start_fake();
+    let downloads = download_methods(port);
+    let mut wrong = Vec::new();
+    let mut swept = 0;
+    for (index, (accept, body)) in strict_json_corpus().iter().enumerate() {
+        for (name, result) in sweep_with_key(port, &format!("corpus-{index}-key")) {
+            if downloads.contains(name) {
+                continue;
+            }
+            swept += 1;
+            let verdict = if *accept { "ACCEPT" } else { "REJECT" };
+            match (accept, &result) {
+                (true, Ok(_)) => {}
+                (true, Err(error)) if !matches!(error, ZBError::ApiError { .. }) => {}
+                (false, Ok(_)) if body.is_empty() && name == "delete_inbox_placement_test" => {}
+                (false, Err(error @ ZBError::ApiError { .. })) if error.status_code() == Some(200) => {}
+                _ => wrong.push(format!("{verdict} {body:?} {name}: {result:?}")),
+            }
+        }
+    }
+    assert!(swept > 60 * 40, "only {swept} calls swept");
+    assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
+}
+
+/// Redaction is closed under encoding: whatever sequence of up to three URL
+/// (%20 or +) and JSON (with or without \/) encodings a response wraps the
+/// key in, at a 400 (text) or a 200 (JSON error), no decoded view of the
+/// error's Display, Debug, source chain or fields holds the key. Every
+/// sequence of the space is tried, so none is left to chance.
+#[test]
+fn every_encoding_of_the_key_is_kept_out_of_every_error() {
+    let (port, fake) = start_fake();
+    let cases: Vec<(usize, &str)> = (0..encoded_secrets::sequences().len())
+        .flat_map(|index| [(index, "t"), (index, "j")])
+        .collect();
+    let leaked = Mutex::new(Vec::new());
+    // Eight workers: each sweep is ~90 requests to the local fake.
+    thread::scope(|scope| {
+        for chunk in cases.chunks(cases.len().div_ceil(8)) {
+            let leaked = &leaked;
+            scope.spawn(move || {
+                let sequences = encoded_secrets::sequences();
+                for (index, shape) in chunk {
+                    let key = format!("enc-{index}-{shape}-{}", encoded_secrets::SECRET);
+                    let results = sweep_with_key(port, &key);
+                    let mut failed = 0;
+                    for (name, result) in &results {
+                        if let Err(error) = result {
+                            failed += 1;
+                            if let Some(text) = encoded_secrets::leaking(&error_texts(error), &key) {
+                                leaked.lock().unwrap().push(format!("{:?} {shape} {name}: {text}", sequences[*index]));
+                            }
+                        }
+                    }
+                    assert!(
+                        failed >= results.len() / 2,
+                        "{:?} {shape}: only {failed} of {} calls failed",
+                        sequences[*index],
+                        results.len()
+                    );
+                }
+            });
+        }
+    });
+    fake.take();
+    let leaked = leaked.into_inner().unwrap();
+    assert!(leaked.is_empty(), "{} errors leak the key: {:#?}", leaked.len(), &leaked[..leaked.len().min(5)]);
 }

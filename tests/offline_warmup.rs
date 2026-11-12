@@ -1,6 +1,8 @@
 //! Offline tests for the Warmup API client. A local fake records every request
 //! and answers without the network.
 
+mod encoded_secrets;
+
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -140,7 +142,10 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                     body,
                 });
 
-                let echoed = echo_answer(path, &api_key).or_else(|| contradiction_answer(&api_key));
+                let echoed = echo_answer(path, &api_key)
+                    .or_else(|| contradiction_answer(&api_key))
+                    .or_else(|| corpus_answer(&api_key))
+                    .or_else(|| encoded_answer(&api_key));
                 let (status, content_type, payload) =
                     fake.reply.lock().unwrap().take().or(echoed).unwrap_or_else(|| {
                         if path.ends_with("/download") {
@@ -241,6 +246,51 @@ fn contradiction_answer(key: &str) -> Option<(u16, String, String)> {
         "csv-as-json-key" => Some((200, "application/json; charset=utf-8".to_string(), csv)),
         _ => None,
     }
+}
+
+/// The shared strict JSON corpus: (accept, body) for each line of
+/// tests/fixtures/strict-json-corpus.tsv, a byte-identical copy of
+/// sdk-docs/skills/zerobounce-sdk/references/strict-json-corpus.tsv (check
+/// E7). Copy it again when that file changes; do not edit it here.
+fn strict_json_corpus() -> &'static Vec<(bool, String)> {
+    static CORPUS: std::sync::OnceLock<Vec<(bool, String)>> = std::sync::OnceLock::new();
+    CORPUS.get_or_init(|| {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/strict-json-corpus.tsv");
+        let text = std::fs::read_to_string(path).unwrap();
+        let bodies: Vec<(bool, String)> = text
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let (verdict, encoded) = line.split_once('\t').unwrap_or_else(|| panic!("corpus line {line:?}"));
+                assert!(verdict == "ACCEPT" || verdict == "REJECT", "corpus line {line:?}");
+                (verdict == "ACCEPT", serde_json::from_str::<String>(encoded).unwrap())
+            })
+            .collect();
+        let accepted = bodies.iter().filter(|(accept, _)| *accept).count();
+        assert!(accepted >= 5 && bodies.len() - accepted >= 30, "corpus has {} lines", bodies.len());
+        bodies
+    })
+}
+
+/// For an "enc-<n>-<t|j>-…" key, the whole key wrapped in encoding sequence
+/// n, quoted in a 400 text body (t) or a 400 JSON error (j).
+fn encoded_answer(key: &str) -> Option<(u16, String, String)> {
+    let mut parts = key.strip_prefix("enc-")?.splitn(3, '-');
+    let index: usize = parts.next()?.parse().ok()?;
+    let shape = parts.next()?;
+    let encoded = encoded_secrets::apply(&encoded_secrets::sequences()[index], key);
+    let message = format!("Bad key [{encoded}] end");
+    if shape == "t" {
+        return Some((400, "text/plain".to_string(), message));
+    }
+    let quoted = serde_json::to_string(&message).unwrap();
+    Some((400, "application/json".to_string(), format!(r#"{{"error":{quoted}}}"#)))
+}
+
+/// For a "corpus-<n>-key" key, line n of the strict JSON corpus as a JSON 200.
+fn corpus_answer(key: &str) -> Option<(u16, String, String)> {
+    let index = key.strip_prefix("corpus-")?.split('-').next()?.parse::<usize>().ok()?;
+    Some((200, "application/json".to_string(), strict_json_corpus()[index].1.clone()))
 }
 
 fn start_fake() -> (u16, Arc<Fake>) {
@@ -1259,4 +1309,191 @@ fn every_warmup_method_rejects_a_content_type_that_contradicts_the_body() {
         fake.take();
         assert!(wrong.is_empty(), "{key}: {wrong:#?}");
     }
+}
+
+// -- exact requests ------------------------------------------------------------
+
+/// Every Warmup request is pinned whole: verb, path, every query parameter
+/// and the exact JSON body, so renaming or adding a wire field, or sending an
+/// unset option, fails here. A Warmup method with no case fails the guard.
+#[test]
+fn every_warmup_request_sends_exactly_the_documented_fields() {
+    use serde_json::json;
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    let password = test_password();
+    let mut content = ZbManagedEmailContent::default();
+    content.types_of_emails = vec!["transactional".into()];
+    let mut sending = ZbManagedSending::default();
+    sending.warmup_start_date = Some(date("2026-03-04"));
+    #[allow(clippy::type_complexity)]
+    let mut cases: Vec<(&str, Box<dyn Fn() -> String + '_>, &str, &str, Vec<(&str, &str)>, Option<Value>)> = Vec::new();
+    macro_rules! case {
+        ($name:literal, $call:expr, $method:literal, $path:literal, [$(($k:literal, $v:expr)),*], $body:expr) => {
+            cases.push(($name, Box::new(|| format!("{:?}", $call)), $method, $path, vec![$(($k, $v)),*], $body));
+        };
+    }
+    case!("list_sending_accounts", zb.list_sending_accounts(), "GET", "/sending-accounts", [], None);
+    case!("get_sending_account", zb.get_sending_account("a+b@c.com"), "GET", "/sending-account", [("from_address", "a+b@c.com")], None);
+    case!("add_sending_account",
+        zb.add_sending_account("a@b.com", OnboardingModel::SelfManaged, Some(2), None, None, None),
+        "POST", "/sending-accounts", [],
+        Some(json!({"from_address": "a@b.com", "onboarding_model": "self_managed", "engagement_rule_id": 2})));
+    case!("add_zb_managed_sending_account",
+        zb.add_zb_managed_sending_account("a@b.com", None, Some(&content), Some(&sending)),
+        "POST", "/sending-accounts", [],
+        Some(json!({"from_address": "a@b.com", "onboarding_model": "zb_managed",
+            "email_content": {"types_of_emails": ["transactional"]},
+            "managed_sending": {"warmup_start_date": "2026-03-04"}})));
+    case!("update_sending_account", zb.update_sending_account("a@b.com", 2, 4, true), "PUT", "/sending-accounts", [],
+        Some(json!({"team_id": 1, "from_address": "a@b.com", "engagement_rule_id": 2, "status_id": 4, "auto_enable": true})));
+    case!("delete_sending_account", zb.delete_sending_account("a@b.com"), "DELETE", "/sending-accounts", [("from_address", "a@b.com")], None);
+    case!("change_from_address", zb.change_from_address("a@b.com", "c@d.com"), "PUT", "/smtp-credentials", [],
+        Some(json!({"team_id": 1, "old_from_address": "a@b.com", "new_from_address": "c@d.com"})));
+    case!("list_from_addresses", zb.list_from_addresses(Some("a@b"), Some(5), Some(10)), "GET", "/from-addresses",
+        [("search_from", "a@b"), ("offset", "5"), ("limit", "10")], None);
+    case!("get_engagement_rules", zb.get_engagement_rules(), "GET", "/engagement-rules", [], None);
+    case!("set_engagement_rule", zb.set_engagement_rule("a@b.com", 3), "PUT", "/engagement-rule", [("c_from", "a@b.com")],
+        Some(json!({"rule_id": 3})));
+    case!("get_custom_engagement", zb.get_custom_engagement("a@b.com"), "GET", "/custom-engagement/a%40b.com", [], None);
+    case!("create_custom_engagement", zb.create_custom_engagement("a@b.com", 10, 20, 30), "POST", "/custom-engagement", [],
+        Some(json!({"c_from": "a@b.com", "reply_pct": 10, "important_pct": 20, "click_pct": 30})));
+    case!("update_custom_engagement", zb.update_custom_engagement("a@b.com", 11, 21, 31), "PUT", "/custom-engagement", [],
+        Some(json!({"c_from": "a@b.com", "reply_pct": 11, "important_pct": 21, "click_pct": 31})));
+    case!("delete_custom_engagement", zb.delete_custom_engagement("a@b.com", 4), "DELETE", "/custom-engagement", [],
+        Some(json!({"c_from": "a@b.com", "engagement_rule_id": 4})));
+    case!("get_seeds", zb.get_seeds(), "GET", "/seeds", [], None);
+    case!("download_seeds", zb.download_seeds(), "GET", "/seeds/download", [], None);
+    case!("get_seed_count", zb.get_seed_count(), "GET", "/seed-count", [], None);
+    case!("get_progress_today", zb.get_progress_today(), "GET", "/progress-today", [], None);
+    case!("get_sent_today", zb.get_sent_today(), "GET", "/sent-today", [], None);
+    case!("get_emails_per_day", zb.get_emails_per_day(), "GET", "/emails-per-day", [], None);
+    case!("get_statistics", zb.get_statistics("a@b.com"), "GET", "/statistics", [("from_address", "a@b.com")], None);
+    case!("get_statistics_per_day", zb.get_statistics_per_day("a@b.com", date("2026-03-04"), date("2026-03-09")),
+        "GET", "/statistics-per-day", [("from_address", "a@b.com"), ("start_date", "2026-03-04"), ("end_date", "2026-03-09")], None);
+    case!("get_statistics_detailed", zb.get_statistics_detailed("a@b.com"), "GET", "/statistics-detailed", [("c_from", "a@b.com")], None);
+    case!("download_statistics", zb.download_statistics("a@b.com"), "GET", "/statistics/download", [("c_from", "a@b.com")], None);
+    case!("get_from_address_statistics", zb.get_from_address_statistics("a@b.com"), "GET", "/from-address-statistics",
+        [("from_address", "a@b.com")], None);
+    case!("check_domain_dmarc", zb.check_domain_dmarc("a@b.com", Some("s1")), "GET", "/check-domain-dmarc",
+        [("from_address", "a@b.com"), ("dkim_selector", "s1")], None);
+    case!("test_smtp_configuration", zb.test_smtp_configuration("a@b.com", "u", &password, "smtp.example.com", 587),
+        "POST", "/test-smtp-configuration", [],
+        Some(json!({"from_address": "a@b.com", "username": "u", "password": password, "server": "smtp.example.com", "port": 587})));
+
+    let named: BTreeSet<String> = cases.iter().map(|case| case.0.to_string()).collect();
+    let defined = public_warmup_request_methods();
+    let missing: Vec<&String> = defined.difference(&named).collect();
+    assert!(missing.is_empty(), "Warmup methods with no exact-request case: {missing:?}");
+
+    for (name, call, method, path, query, body) in &cases {
+        let result = call();
+        assert!(!result.starts_with("Err"), "{name}: {result}");
+        let request = fake.only();
+        let want_query: HashMap<String, String> =
+            query.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        assert_eq!(request.method, *method, "{name}");
+        assert_eq!(request.path, format!("/api/v1/warmup{path}"), "{name}");
+        assert_eq!(request.query, want_query, "{name}");
+        assert_eq!(&request.body, body, "{name}");
+    }
+}
+
+/// The optional parameters go out only when set: no dkim_selector, no list
+/// filters, and for self_managed no ignore_conflict unless the caller set it,
+/// in which case false is sent as false.
+#[test]
+fn warmup_optional_fields_are_sent_only_when_set() {
+    use serde_json::json;
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    zb.check_domain_dmarc("a@b.com", None).unwrap();
+    let request = fake.only();
+    assert_eq!(request.query, HashMap::from([("from_address".to_string(), "a@b.com".to_string())]));
+    zb.list_from_addresses(None, None, None).unwrap();
+    assert!(fake.only().query.is_empty());
+    zb.list_from_addresses(None, Some(0), None).unwrap();
+    assert_eq!(fake.only().query, HashMap::from([("offset".to_string(), "0".to_string())]));
+    for flag in [false, true] {
+        zb.add_sending_account("a@b.com", OnboardingModel::SelfManaged, Some(0), Some(flag), None, None)
+            .unwrap();
+        assert_eq!(
+            fake.only().body.unwrap(),
+            json!({"from_address": "a@b.com", "onboarding_model": "self_managed", "engagement_rule_id": 0, "ignore_conflict": flag})
+        );
+    }
+}
+
+/// Every Warmup JSON call rejects every REJECT body of the shared corpus as an
+/// ApiError with status 200, and takes every ACCEPT body as JSON. A zero-length
+/// 200 is the documented empty success (None); a body of whitespace is not
+/// empty, and is rejected like any other non-JSON body.
+#[test]
+fn every_warmup_json_call_follows_the_strict_json_corpus() {
+    let (port, fake) = start_fake();
+    let mut wrong = Vec::new();
+    let mut swept = 0;
+    for (index, (accept, body)) in strict_json_corpus().iter().enumerate() {
+        let zb = ZeroBounceWarmup::with_base_url(&format!("corpus-{index}-key"), &format!("http://127.0.0.1:{port}")).unwrap();
+        sweep_every_warmup_method(&zb, &mut |name, result| {
+            if name.starts_with("download_") {
+                return;
+            }
+            swept += 1;
+            let verdict = if *accept { "ACCEPT" } else { "REJECT" };
+            match (accept, &result) {
+                (true, Ok(value)) if value.starts_with("Some(") => {}
+                (false, Ok(value)) if body.is_empty() && value == "None" => {}
+                (false, Err(error @ ZBError::ApiError { .. })) if error.status_code() == Some(200) => {}
+                _ => wrong.push(format!("{verdict} {body:?} {name}: {result:?}")),
+            }
+        });
+        fake.take();
+    }
+    assert!(swept > 25 * 40, "only {swept} calls swept");
+    assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
+}
+
+/// Redaction is closed under encoding on the Warmup client too: whatever
+/// sequence of up to three URL (%20 or +) and JSON (with or without \/)
+/// encodings a response wraps the key in, no decoded view of any error
+/// holds it. The SMTP password and username get the same check.
+#[test]
+fn every_encoding_of_a_warmup_secret_is_kept_out_of_every_error() {
+    let (port, fake) = start_fake();
+    let mut leaked = Vec::new();
+    for (index, sequence) in encoded_secrets::sequences().iter().enumerate() {
+        for shape in ["t", "j"] {
+            let key = format!("enc-{index}-{shape}-{}", encoded_secrets::SECRET);
+            let zb = ZeroBounceWarmup::with_base_url(&key, &format!("http://127.0.0.1:{port}")).unwrap();
+            let mut failed = 0;
+            sweep_every_warmup_method(&zb, &mut |name, result| {
+                if let Err(error) = result {
+                    failed += 1;
+                    let texts = [error.to_string(), format!("{error:?}"), format!("{error:#?}")];
+                    if let Some(text) = encoded_secrets::leaking(&texts, &key) {
+                        leaked.push(format!("{sequence:?} {shape} {name}: {text}"));
+                    }
+                }
+            });
+            fake.take();
+            assert!(failed > 20, "{sequence:?} {shape}: only {failed} calls failed");
+        }
+        // The SMTP password and username, echoed by the one SMTP test call.
+        let zb = client(port);
+        let password = format!("{}{}", test_password(), encoded_secrets::SECRET);
+        let username = format!("user {}", encoded_secrets::SECRET);
+        for secret in [&password, &username] {
+            fake.reply_with(400, "text/plain", &format!("Bad login [{}] end", encoded_secrets::apply(sequence, secret)));
+            let error = zb
+                .test_smtp_configuration("a@b.com", &username, &password, "smtp.example.com", 587)
+                .unwrap_err();
+            fake.take();
+            let texts = [error.to_string(), format!("{error:?}"), format!("{error:#?}")];
+            if let Some(text) = encoded_secrets::leaking(&texts, secret) {
+                leaked.push(format!("{sequence:?} smtp: {text}"));
+            }
+        }
+    }
+    assert!(leaked.is_empty(), "{} errors leak a secret: {:#?}", leaked.len(), &leaked[..leaked.len().min(5)]);
 }

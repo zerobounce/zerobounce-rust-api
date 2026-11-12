@@ -120,6 +120,10 @@ fn scrub_query_string_values(text: &str) -> String {
 /// response body through it, so a body that echoes the key (an error quoting
 /// the request URL, `{"error": "Invalid API key <key>"}`) does not hand the
 /// key to the caller.
+///
+/// Redaction is closed under encoding: a message that still holds a secret in
+/// any decoded view ([`secret_survives_decoding`]) is replaced whole by
+/// [`CREDENTIAL_OMITTED_MESSAGE`].
 pub(crate) fn redact_secrets(text: &str, secrets: &[&str]) -> String {
     let mut value = text.to_string();
     for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
@@ -129,7 +133,140 @@ pub(crate) fn redact_secrets(text: &str, secrets: &[&str]) -> String {
             }
         }
     }
-    scrub_query_string_values(&value)
+    let value = scrub_query_string_values(&value);
+    if secret_survives_decoding(&value, secrets) {
+        return CREDENTIAL_OMITTED_MESSAGE.to_string();
+    }
+    value
+}
+
+/// What replaces a message that still held a secret after masking.
+pub(crate) const CREDENTIAL_OMITTED_MESSAGE: &str =
+    "ZeroBounce's response was omitted from this error because it contained a credential.";
+
+/// Whether any view of `text`, decoded up to three layers deep in any order
+/// (percent-decoding, percent-decoding with `+` as a space, JSON-unescaping
+/// with `\/` and `\uXXXX`), contains a secret. `secret_forms` masks the
+/// spellings this crate can generate; this catches every other one (lowercase
+/// percent escapes, a third layer, another JSON escaper).
+fn secret_survives_decoding(text: &str, secrets: &[&str]) -> bool {
+    let secrets: Vec<&str> = secrets.iter().copied().filter(|secret| !secret.is_empty()).collect();
+    if secrets.is_empty() {
+        return false;
+    }
+    let decoders: [fn(&str) -> String; 3] = [
+        |text| percent_decoded(text, false),
+        |text| percent_decoded(text, true),
+        json_unescaped,
+    ];
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(text.to_string());
+    let mut views = vec![text.to_string()];
+    for layer in 0..=3 {
+        let mut next = Vec::new();
+        for view in &views {
+            if secrets.iter().any(|secret| view.contains(secret)) {
+                return true;
+            }
+            if layer == 3 {
+                continue;
+            }
+            for decode in decoders {
+                let decoded = decode(view);
+                if seen.insert(decoded.clone()) {
+                    next.push(decoded);
+                }
+            }
+        }
+        views = next;
+    }
+    false
+}
+
+/// `text` with each valid `%XX` escape decoded (and `+` as a space when
+/// asked); anything else is kept as it is. Bytes that do not form UTF-8 are
+/// replaced, as they cannot be part of a secret.
+fn percent_decoded(text: &str, plus_is_space: bool) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if byte == b'%' && i + 2 < bytes.len() {
+            if let (Some(high), Some(low)) = (
+                (bytes[i + 1] as char).to_digit(16),
+                (bytes[i + 2] as char).to_digit(16),
+            ) {
+                out.push((high * 16 + low) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if byte == b'+' && plus_is_space { b' ' } else { byte });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `text` with each valid JSON string escape decoded (`\"`, `\\`, `\/`,
+/// `\b`, `\f`, `\n`, `\r`, `\t`, `\uXXXX` and surrogate pairs); anything
+/// else is kept as it is.
+fn json_unescaped(text: &str) -> String {
+    fn hex4(chars: &[char], at: usize) -> Option<u32> {
+        let digits: String = chars.get(at..at + 4)?.iter().collect();
+        if digits.len() != 4 || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        u32::from_str_radix(&digits, 16).ok()
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '\\' || i + 1 >= chars.len() {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let simple = match chars[i + 1] {
+            '"' => Some('"'),
+            '\\' => Some('\\'),
+            '/' => Some('/'),
+            'b' => Some('\u{8}'),
+            'f' => Some('\u{c}'),
+            'n' => Some('\n'),
+            'r' => Some('\r'),
+            't' => Some('\t'),
+            _ => None,
+        };
+        if let Some(decoded) = simple {
+            out.push(decoded);
+            i += 2;
+            continue;
+        }
+        if chars[i + 1] == 'u' {
+            if let Some(code) = hex4(&chars, i + 2) {
+                // A surrogate pair (\ud83d\ude00) is one character.
+                if (0xD800..0xDC00).contains(&code)
+                    && chars.get(i + 6) == Some(&'\\')
+                    && chars.get(i + 7) == Some(&'u')
+                {
+                    if let Some(low) = hex4(&chars, i + 8).filter(|low| (0xDC00..0xE000).contains(low)) {
+                        let combined = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                        out.push(char::from_u32(combined).unwrap_or('\u{FFFD}'));
+                        i += 12;
+                        continue;
+                    }
+                }
+                out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
+                i += 6;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 /// The HTTP client both API clients use: explicit timeout, redirects never
@@ -191,6 +328,87 @@ fn client_or_error(
 #[cfg(test)]
 mod redaction_tests {
     use super::redact_secrets;
+
+    /// Redaction is closed under encoding: every sequence of up to three
+    /// encodings of a secret (URL with %20 or +, JSON with or without \/),
+    /// then a seeded random sample of them with lowercase percent escapes and
+    /// random surrounding text, leaves no decoded view holding the secret. A
+    /// spelling `secret_forms` does not generate drops the whole message.
+    #[test]
+    fn redaction_is_closed_under_encoding() {
+        let secret = r#"a b"c/d+e%f&g=h<i>j'k\l"#;
+        // URL with %20, URL with +, JSON, JSON with \/.
+        let encoders: [fn(&str) -> String; 4] = [
+            |text| super::url_forms(text)[1].clone(),
+            |text| super::url_forms(text)[0].clone(),
+            |text| super::json_escaped(text, false),
+            |text| super::json_escaped(text, true),
+        ];
+        let mut sequences: Vec<Vec<usize>> = vec![vec![]];
+        for depth in 1..=3 {
+            let mut next = Vec::new();
+            for prefix in sequences.iter().filter(|s| s.len() == depth - 1) {
+                for encoder in 0..encoders.len() {
+                    let mut sequence = prefix.clone();
+                    sequence.push(encoder);
+                    next.push(sequence);
+                }
+            }
+            sequences.extend(next);
+        }
+        assert_eq!(sequences.len(), 85);
+        // A small LCG, seeded, for the random sample.
+        let mut state: u64 = 20261112;
+        let mut random = |below: usize| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((state >> 33) as usize) % below
+        };
+        // (encoder sequence, lowercase it, text around it)
+        type Case = (Vec<usize>, bool, String);
+        let mut cases: Vec<Case> =
+            sequences.iter().map(|sequence| (sequence.clone(), false, String::new())).collect();
+        for _ in 0..500 {
+            let sequence = (0..random(4)).map(|_| random(encoders.len())).collect();
+            cases.push((sequence, random(2) == 0, format!("{{\"x\":{}}} \"q\"", random(1000))));
+        }
+        let mut omitted = 0;
+        for (sequence, lowercase, around) in cases {
+            let mut encoded = secret.to_string();
+            for &encoder in &sequence {
+                encoded = encoders[encoder](&encoded);
+            }
+            if lowercase {
+                encoded = encoded.to_lowercase();
+            }
+            let message = format!("echo {around}[{encoded}] end");
+            for secrets in [vec![secret], vec!["other-key", secret], vec![secret, "smtp-user"]] {
+                let got = redact_secrets(&message, &secrets);
+                if got == super::CREDENTIAL_OMITTED_MESSAGE {
+                    omitted += 1;
+                }
+                let mut views = vec![got.clone()];
+                for _ in 0..3 {
+                    let mut next = Vec::new();
+                    for view in &views {
+                        next.push(super::percent_decoded(view, false));
+                        next.push(super::percent_decoded(view, true));
+                        next.push(super::json_unescaped(view));
+                    }
+                    views.extend(next);
+                }
+                assert!(
+                    views.iter().all(|view| !view.contains(secret)),
+                    "{sequence:?} lowercase={lowercase}: {got:?}"
+                );
+            }
+        }
+        assert!(omitted > 0, "no message needed the decode check");
+        // A message with no secret in it is kept as it is.
+        assert_eq!(
+            redact_secrets(r"Invalid email %2F \u0041", &[secret]),
+            r"Invalid email %2F \u0041"
+        );
+    }
 
     /// Every form of a key, and any api_key value, whichever key it holds.
     #[test]

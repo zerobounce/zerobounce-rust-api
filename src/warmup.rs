@@ -242,7 +242,8 @@ impl ZeroBounceWarmup {
         secrets: &[&str],
     ) -> ZBResult<Option<Value>> {
         let (status, content_type, text) = self.send(method, path, query, body, secrets)?;
-        if status == 204 || text.trim().is_empty() {
+        // A body of whitespace is not empty: it is not JSON either.
+        if status == 204 || text.is_empty() {
             return Ok(None);
         }
         // A text/html response is a page (a proxy or a challenge), not the

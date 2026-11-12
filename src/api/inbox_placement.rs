@@ -285,7 +285,7 @@ impl ZeroBounce {
 
         let response = request.send()?;
         let (status, content_type, content) = Self::read_api_body(response)?;
-        if empty_2xx_is_success && (200..300).contains(&status) && content.trim().is_empty() {
+        if empty_2xx_is_success && (200..300).contains(&status) && content.is_empty() {
             return Ok(Value::Null);
         }
         crate::utility::http_error::ensure_json_api_body(status, &content_type, &content)

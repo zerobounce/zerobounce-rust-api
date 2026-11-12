@@ -186,17 +186,27 @@ pub fn ensure_json_api_body(status: u16, content_type: &str, body: &str) -> ZBRe
         || trimmed.is_empty()
         || body_looks_like_html(body)
         || content_type_is_html(content_type)
-        || (!trimmed.starts_with('{') && !trimmed.starts_with('['))
     {
         return Err(ZBError::api(
             status,
             message_from_body(status, content_type, body),
         ));
     }
+    // Strict RFC 8259 JSON, parsed from the body as received: serde_json
+    // allows only space, tab, CR and LF around the value, and no BOM,
+    // comment, trailing comma or value, NaN or other extension
+    // (tests/fixtures/strict-json-corpus.tsv). `str::trim` would also drop
+    // Unicode spaces such as U+00A0. Text that is not JSON is its own message;
     // JSON that does not parse is not an API answer either. (A body that
     // parses but does not fit the response type is the SDK's parse error.)
-    let parsed = match serde_json::from_str::<serde_json::Value>(trimmed) {
+    let parsed = match serde_json::from_str::<serde_json::Value>(body) {
         Ok(parsed) => parsed,
+        Err(_) if !trimmed.starts_with('{') && !trimmed.starts_with('[') => {
+            return Err(ZBError::api(
+                status,
+                message_from_body(status, content_type, body),
+            ))
+        }
         Err(_) => {
             return Err(ZBError::api(
                 status,
