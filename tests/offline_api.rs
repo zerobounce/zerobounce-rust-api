@@ -160,6 +160,14 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
     if key.starts_with("html-200-") {
         return (200, "text/html; charset=UTF-8", page);
     }
+    // "empty-status-401-…": that status with an empty body.
+    if let Some(status) = key
+        .strip_prefix("empty-status-")
+        .and_then(|rest| rest.get(..3))
+        .and_then(|code| code.parse().ok())
+    {
+        return (status, "application/json", String::new());
+    }
     if key.starts_with("empty-") {
         return (200, "application/json", String::new());
     }
@@ -1556,6 +1564,21 @@ fn inbox_placement_delete_answered_with_no_content_is_a_success() {
     }
 }
 
+/// Only an empty *2xx* DELETE is a success: an empty 401 or 500 is an error
+/// carrying that status, as on every other call.
+#[test]
+fn inbox_placement_delete_with_an_empty_error_status_is_an_error() {
+    let (port, fake) = start_fake();
+    for status in [401u16, 500] {
+        let zb = client(port, &format!("empty-status-{status}-key"));
+        let error = zb
+            .delete_inbox_placement_test("t1")
+            .expect_err(&format!("an empty {status} was accepted"));
+        assert_eq!(error.status_code(), Some(status), "{error:?}");
+        assert_eq!(only(&fake).method, "DELETE");
+    }
+}
+
 #[test]
 fn inbox_placement_list_sends_only_the_filters_that_are_set() {
     let (port, fake) = start_fake();
@@ -2188,28 +2211,27 @@ fn the_main_client_refuses_redirects() {
 }
 
 /// The Warmup client already refused such a key; the main client sent it.
+/// Every public request method refuses it before anything is sent (the sweep
+/// is held complete by `plain_http_is_refused_on_every_public_request_method`).
+/// The Warmup client checks its key once, in its constructor (its key field
+/// is private), which `offline_warmup.rs` covers.
 #[test]
 fn a_key_with_whitespace_or_control_characters_is_rejected_before_a_request() {
     let (port, fake) = start_fake();
     for key in [" key", "key ", "\tkey", "key\n", "ke\u{0}y", "ke\u{7f}y", "ke\ry"] {
         let zb = client(port, key);
-        let results: Vec<(&str, Result<(), ZBError>)> = vec![
-            ("get_credits", zb.get_credits().map(|_| ())),
-            ("validate_email", zb.validate_email("a@example.com").map(|_| ())),
-            ("batch_validate", zb.batch_validate(vec![("a@example.com".into(), String::new())]).map(|_| ())),
-            ("bulk_validation_file_status_check", zb.bulk_validation_file_status_check("fid").map(|_| ())),
-            ("get_inbox_placement_providers", zb.get_inbox_placement_providers().map(|_| ())),
-        ];
-        for (name, result) in results {
-            match result {
-                Err(ZBError::ExplicitError(message)) => assert!(
-                    message.contains("surrounding whitespace or control characters"),
-                    "{name}: {message}"
-                ),
-                other => panic!("{name}: expected the key to be rejected, got {other:?}"),
-            }
-        }
-        assert_eq!(fake.len(), 0, "a request was sent");
+        let mut accepted = Vec::new();
+        let swept = sweep_every_request_method(&zb, &mut |name, result| match result {
+            Err(ZBError::ExplicitError(message))
+                if message.contains("surrounding whitespace or control characters") => {}
+            other => accepted.push(format!("{name}: {other:?}")),
+        });
+        assert!(!swept.is_empty());
+        assert!(
+            accepted.is_empty(),
+            "{key:?}: not rejected for the key: {accepted:#?}"
+        );
+        assert_eq!(fake.len(), 0, "{key:?}: a request was sent");
     }
     client(port, "plain-key").get_credits().unwrap();
     assert_eq!(fake.take().len(), 1);
