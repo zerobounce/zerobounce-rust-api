@@ -60,24 +60,33 @@ fn url_forms(text: &str) -> [String; 2] {
     [query, strict]
 }
 
-/// Every form a message can carry `secret` in, longest first: as sent,
-/// percent-encoded the way a query or form encodes it and strictly (path
-/// escaping), JSON-escaped, with and without `\/` for `/`, and each JSON form
-/// percent-encoded both ways, which is how a server echoes a URL-encoded JSON
-/// request body. Longest first, so a shorter form is never masked inside a
-/// longer one and part of the longer one left behind.
-fn secret_forms(secret: &str) -> Vec<String> {
-    let quoted = serde_json::to_string(secret).unwrap_or_default();
-    let json = quoted
+/// `text` as it sits inside a JSON string, with `/` as is or as `\/`.
+fn json_escaped(text: &str, escape_slash: bool) -> String {
+    let quoted = serde_json::to_string(text).unwrap_or_default();
+    let inner = quoted
         .strip_prefix('"')
         .and_then(|inner| inner.strip_suffix('"'))
-        .unwrap_or(secret)
-        .to_string();
-    let json_slash = json.replace('/', "\\/");
+        .unwrap_or(text);
+    if escape_slash {
+        inner.replace('/', "\\/")
+    } else {
+        inner.to_string()
+    }
+}
+
+/// Every form a message can carry `secret` in, composed from the encoders up
+/// to depth 2: {as sent, JSON-escaped, JSON-escaped with `\/` for `/`} x {as
+/// is, percent-encoded the way a query or form encodes it, strictly (path
+/// escaping)}, and each JSON form escaped twice (a JSON error body quoting
+/// the JSON request body). Longest first, so a shorter form is never masked
+/// inside a longer one and part of the longer one left behind.
+fn secret_forms(secret: &str) -> Vec<String> {
     let mut forms = vec![secret.to_string()];
     forms.extend(url_forms(secret));
-    for escaped in [json, json_slash] {
+    for escape_slash in [false, true] {
+        let escaped = json_escaped(secret, escape_slash);
         forms.extend(url_forms(&escaped));
+        forms.push(json_escaped(&escaped, escape_slash));
         forms.push(escaped);
     }
     forms.sort_by_key(|form| std::cmp::Reverse(form.len()));
@@ -139,6 +148,13 @@ thread_local! {
     static TIMEOUT_DIVISOR: std::cell::Cell<u32> = const { std::cell::Cell::new(1) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The timeout of the last client [`http_client_with_timeout`] built on
+    /// this thread, so a unit test can pin the exact value a constructor uses.
+    static LAST_TIMEOUT: std::cell::Cell<Option<std::time::Duration>> = const { std::cell::Cell::new(None) };
+}
+
 /// `timeout` unchanged, except in this crate's unit tests, which may shrink
 /// it ([`TIMEOUT_DIVISOR`]).
 fn scaled_for_tests(timeout: std::time::Duration) -> std::time::Duration {
@@ -156,6 +172,8 @@ pub(crate) const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::fro
 fn http_client_with_timeout(
     timeout: std::time::Duration,
 ) -> ZBResult<reqwest::blocking::Client> {
+    #[cfg(test)]
+    LAST_TIMEOUT.with(|last| last.set(Some(timeout)));
     client_or_error(
         reqwest::blocking::Client::builder()
             .timeout(timeout)
@@ -220,11 +238,61 @@ mod redaction_tests {
             r#"{"error":"bad key ***"}"#
         );
     }
+
+    /// Every spelling of a secret, composed here from the encoders
+    /// themselves, is masked whole: {raw, JSON, JSON with `\/`} x {as is,
+    /// query-encoded with `+`, with `%20`}, and each JSON form escaped twice.
+    /// The secret holds every character an encoding changes, so the spellings
+    /// all differ and dropping any one generator from `secret_forms` fails.
+    #[test]
+    fn every_composed_spelling_of_a_secret_is_masked_whole() {
+        type Encoder = Box<dyn Fn(&str) -> String>;
+        let secret = r#"a b"c/d+e%f&g=h<i>j'k\l"#;
+        let json = |text: &str, slash: bool| {
+            let quoted = serde_json::to_string(text).unwrap();
+            let inner = &quoted[1..quoted.len() - 1];
+            if slash {
+                inner.replace('/', "\\/")
+            } else {
+                inner.to_string()
+            }
+        };
+        let query = |text: &str| {
+            let mut url = reqwest::Url::parse("https://x.test/").unwrap();
+            url.query_pairs_mut().append_pair("k", text);
+            url.query().unwrap()["k=".len()..].to_string()
+        };
+        let escapers: Vec<(&str, Encoder)> = vec![
+            ("raw", Box::new(|text| text.to_string())),
+            ("json", Box::new(move |text| json(text, false))),
+            ("json \\/", Box::new(move |text| json(text, true))),
+        ];
+        let url_encoders: Vec<(&str, Encoder)> = vec![
+            ("", Box::new(|text| text.to_string())),
+            (", query +", Box::new(move |text| query(text))),
+            (", query %20", Box::new(move |text| query(text).replace('+', "%20"))),
+        ];
+        let mut spellings = std::collections::BTreeMap::new();
+        for (escape_name, escape) in &escapers {
+            for (url_name, encode) in &url_encoders {
+                spellings.insert(format!("{escape_name}{url_name}"), encode(&escape(secret)));
+            }
+            if *escape_name != "raw" {
+                spellings.insert(format!("{escape_name}, twice"), escape(&escape(secret)));
+            }
+        }
+        assert_eq!(spellings.len(), 3 * 3 + 2);
+        let distinct: std::collections::HashSet<&String> = spellings.values().collect();
+        assert_eq!(distinct.len(), spellings.len(), "{spellings:?}");
+        for (name, text) in &spellings {
+            assert_eq!(redact_secrets(&format!("<{text}>"), &[secret]), "<***>", "the {name} spelling was left");
+        }
+    }
 }
 
 #[cfg(test)]
 mod http_client_tests {
-    use super::{client_or_error, http_client_with_timeout, ZBError, REQUEST_TIMEOUT, TIMEOUT_DIVISOR};
+    use super::{client_or_error, http_client_with_timeout, ZBError, LAST_TIMEOUT, REQUEST_TIMEOUT, TIMEOUT_DIVISOR};
     use std::io::Read;
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -233,6 +301,15 @@ mod http_client_tests {
     #[test]
     fn the_request_timeout_is_two_minutes() {
         assert_eq!(REQUEST_TIMEOUT, Duration::from_secs(120));
+    }
+
+    /// The Warmup client's default timeout is exactly REQUEST_TIMEOUT: the
+    /// behavioural test below only bounds it to within a few tenths.
+    #[test]
+    fn the_warmup_client_is_built_with_exactly_the_request_timeout() {
+        LAST_TIMEOUT.with(|last| last.set(None));
+        let _warmup = crate::ZeroBounceWarmup::new("timeout-key").unwrap();
+        assert_eq!(LAST_TIMEOUT.with(|last| last.get()), Some(Duration::from_secs(120)));
     }
 
     /// A local server that accepts every request, reads it and never answers.
