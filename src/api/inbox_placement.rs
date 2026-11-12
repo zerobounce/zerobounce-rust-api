@@ -194,9 +194,12 @@ impl ZeroBounce {
     }
 
     /// Delete a finished test. `DELETE /test/{id}`
+    ///
+    /// The API may answer with `204 No Content`. An empty 2xx is a success
+    /// and comes back as [`Value::Null`].
     pub fn delete_inbox_placement_test(&self, test_id: &str) -> ZBResult<Value> {
         let path = format!("/test/{}", Self::inbox_placement_test_path(test_id)?);
-        self.inbox_placement_request("DELETE", &path, HashMap::new(), None)
+        self.inbox_placement_send("DELETE", &path, HashMap::new(), None, true)
     }
 
     /// The webhook URL saved on this API key. `GET /webhook`
@@ -238,6 +241,20 @@ impl ZeroBounce {
         query: HashMap<&'a str, &'a str>,
         body: Option<Value>,
     ) -> ZBResult<Value> {
+        self.inbox_placement_send(method, path, query, body, false)
+    }
+
+    /// `empty_2xx_is_success` is for a call that returns nothing (DELETE): an
+    /// empty 2xx, such as `204 No Content`, is then `Value::Null`. Every other
+    /// call must get a JSON body, and an empty one is an error.
+    fn inbox_placement_send<'a>(
+        &'a self,
+        method: &str,
+        path: &str,
+        query: HashMap<&'a str, &'a str>,
+        body: Option<Value>,
+        empty_2xx_is_success: bool,
+    ) -> ZBResult<Value> {
         self.require_key()?;
 
         // The same https rule as every other request: an http:// override would
@@ -267,7 +284,11 @@ impl ZeroBounce {
         }
 
         let response = request.send()?;
-        let content = self.read_api_response(response)?;
+        let (status, content_type, content) = Self::read_api_body(response)?;
+        if empty_2xx_is_success && (200..300).contains(&status) && content.trim().is_empty() {
+            return Ok(Value::Null);
+        }
+        crate::utility::http_error::ensure_json_api_body(status, &content_type, &content)?;
         crate::utility::http_error::parse_json_body(&content)
     }
 }

@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -28,6 +29,9 @@ struct Recorded {
 
 struct Fake {
     records: Mutex<Vec<Recorded>>,
+    /// Added to the Content-Length the fake announces. The body itself is
+    /// sent whole, so a non-zero value is a response cut short.
+    extra_length: AtomicUsize,
 }
 
 impl Fake {
@@ -158,6 +162,9 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
     }
     if key.starts_with("empty-") {
         return (200, "application/json", String::new());
+    }
+    if key.starts_with("no-content-") {
+        return (204, "application/json", String::new());
     }
     if key.starts_with("malformed-") {
         return (
@@ -408,7 +415,7 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                     };
                     let response = format!(
                         "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\n{location}Content-Length: {}\r\nConnection: close\r\n\r\n",
-                        payload.len()
+                        payload.len() + fake.extra_length.load(Ordering::SeqCst)
                     );
                     let _ = stream.write_all(response.as_bytes());
                     let _ = stream.write_all(payload.as_bytes());
@@ -424,6 +431,7 @@ fn start_fake() -> (u16, Arc<Fake>) {
     let port = listener.local_addr().unwrap().port();
     let fake = Arc::new(Fake {
         records: Mutex::new(Vec::new()),
+        extra_length: AtomicUsize::new(0),
     });
     let shared = fake.clone();
     thread::spawn(move || {
@@ -1516,6 +1524,38 @@ fn inbox_placement_uses_its_own_host_and_camel_case_json() {
     );
 }
 
+/// The API answers a DELETE with `204 No Content`: a success with no body.
+/// It used to come back as an ApiError, "Empty response from ZeroBounce (HTTP
+/// 204)". The Go SDK returns success. An empty 2xx on a call that must return
+/// data is still an error.
+#[test]
+fn inbox_placement_delete_answered_with_no_content_is_a_success() {
+    let (port, fake) = start_fake();
+    for key in ["no-content-key", "empty-key"] {
+        let zb = client(port, key);
+        let value = zb.delete_inbox_placement_test("t1").unwrap();
+        assert_eq!(value, serde_json::Value::Null, "{key}");
+        let request = only(&fake);
+        assert_eq!(request.method, "DELETE");
+        assert!(request.path.ends_with("/api/ipt/test/t1"), "{}", request.path);
+
+        for (name, result) in [
+            ("get_inbox_placement_providers", zb.get_inbox_placement_providers()),
+            ("get_inbox_placement_test_types", zb.get_inbox_placement_test_types()),
+            ("create_inbox_placement_test", zb.create_inbox_placement_test("t", &Default::default())),
+            ("get_inbox_placement_test", zb.get_inbox_placement_test("t1")),
+            ("list_inbox_placement_tests", zb.list_inbox_placement_tests(&Default::default())),
+            ("get_inbox_placement_webhook", zb.get_inbox_placement_webhook()),
+            ("set_inbox_placement_webhook", zb.set_inbox_placement_webhook("https://example.com/hook")),
+        ] {
+            let error = result.expect_err(name);
+            assert!(error.status_code().is_some_and(|status| (200..300).contains(&status)), "{name}: {error:?}");
+            assert!(error.to_string().contains("Empty response"), "{name}: {error}");
+        }
+        fake.take();
+    }
+}
+
 #[test]
 fn inbox_placement_list_sends_only_the_filters_that_are_set() {
     let (port, fake) = start_fake();
@@ -1734,16 +1774,19 @@ fn assert_nothing_sent(fake: &Fake, name: &str) {
     );
 }
 
-/// Calls every public request method of `ZeroBounce` against the plain-http
-/// client and returns the names it called, so the guard below can hold them
-/// against the methods `src/` defines. Named after the `pub fn`; the v2
-/// builders are swept through their `call()`.
+/// Calls every public request method of `ZeroBounce`, hands each result
+/// (its value as Debug text) to `check`, and returns the names it called, so
+/// the guard below can hold them against the methods `src/` defines. Named
+/// after the `pub fn`; the v2 builders are swept through their `call()`.
 #[allow(deprecated)] // find_email and domain_search are deprecated, not gone
-fn sweep_every_request_method(zb: &ZeroBounce) -> Vec<&'static str> {
+fn sweep_every_request_method(
+    zb: &ZeroBounce,
+    check: &mut dyn FnMut(&'static str, Result<String, ZBError>),
+) -> Vec<&'static str> {
     let mut swept = Vec::new();
     macro_rules! sweep {
         ($name:literal, $call:expr) => {{
-            assert_refused_plaintext($name, $call);
+            check($name, $call.map(|value| format!("{value:?}")));
             swept.push($name);
         }};
     }
@@ -1932,8 +1975,10 @@ fn public_request_methods() -> BTreeSet<String> {
 fn plain_http_is_refused_on_every_public_request_method() {
     let (port, fake) = start_fake();
     let zb = plaintext_client(port, "plain-sweep-key");
-    let swept: BTreeSet<String> = sweep_every_request_method(&zb)
-        .into_iter()
+    let swept: BTreeSet<String> = sweep_every_request_method(&zb, &mut |name, result| {
+        assert_refused_plaintext(name, result)
+    })
+    .into_iter()
         .map(String::from)
         .collect();
     assert_nothing_sent(&fake, "plain-http sweep");
@@ -1949,6 +1994,43 @@ fn plain_http_is_refused_on_every_public_request_method() {
         unknown.is_empty(),
         "swept names with no `pub fn` in an `impl ZeroBounce` block: {unknown:?}"
     );
+}
+
+/// A response cut short (the connection closes before the announced
+/// Content-Length arrives) is an error on every public request method, JSON
+/// calls and file downloads alike, even though the bytes that did arrive are
+/// a complete success body. A download returns no content, so the caller has
+/// no partial file to write.
+#[test]
+fn a_body_cut_short_is_an_error_on_every_public_request_method() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "cut-short-key");
+
+    // Control: with an honest Content-Length every call succeeds on the same
+    // body, so the errors below come from the truncation alone.
+    let mut failed = Vec::new();
+    sweep_every_request_method(&zb, &mut |name, result| {
+        if let Err(error) = result {
+            failed.push(format!("{name}: {error}"));
+        }
+    });
+    assert!(failed.is_empty(), "these fail on a whole body too: {failed:#?}");
+
+    fake.extra_length.store(1000, Ordering::SeqCst);
+    let mut accepted = Vec::new();
+    let mut leaked = Vec::new();
+    let swept = sweep_every_request_method(&zb, &mut |name, result| match result {
+        Ok(value) => accepted.push(format!("{name}: {}", value.chars().take(80).collect::<String>())),
+        Err(error) => {
+            if error.to_string().contains("cut-short-key") || format!("{error:?}").contains("cut-short-key") {
+                leaked.push(name);
+            }
+        }
+    });
+    fake.extra_length.store(0, Ordering::SeqCst);
+    assert!(!swept.is_empty());
+    assert!(accepted.is_empty(), "a body cut short was accepted: {accepted:#?}");
+    assert!(leaked.is_empty(), "errors carrying the key: {leaked:?}");
 }
 
 /// The plaintext client itself works: the same requests reach the fake once

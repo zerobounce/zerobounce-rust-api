@@ -190,6 +190,17 @@ impl ZeroBounce {
         response: reqwest::blocking::Response,
         message_only_is_failure: bool,
     ) -> ZBResult<String> {
+        let (status, content_type, response_content) = Self::read_api_body(response)?;
+        utility::http_error::ensure_json_api_body(status, &content_type, &response_content)?;
+        if message_only_is_failure {
+            utility::http_error::reject_message_only_body(status, &content_type, &response_content)?;
+        }
+        Ok(response_content)
+    }
+
+    /// The status, content type and body of a response, the body read up to
+    /// the JSON size cap. Checking it is the caller's job.
+    fn read_api_body(response: reqwest::blocking::Response) -> ZBResult<(u16, String, String)> {
         let status = response.status().as_u16();
         let content_type = response
             .headers()
@@ -202,12 +213,7 @@ impl ZeroBounce {
             utility::MAX_JSON_RESPONSE_BYTES,
             "response body exceeds size limit",
         )?;
-        let response_content = String::from_utf8_lossy(&body).into_owned();
-        utility::http_error::ensure_json_api_body(status, &content_type, &response_content)?;
-        if message_only_is_failure {
-            utility::http_error::reject_message_only_body(status, &content_type, &response_content)?;
-        }
-        Ok(response_content)
+        Ok((status, content_type, String::from_utf8_lossy(&body).into_owned()))
     }
 
     fn generic_get_request<'a>(

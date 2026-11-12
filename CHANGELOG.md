@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `delete_inbox_placement_test` answered with an empty 2xx (`204 No Content`) now returns `Ok(Value::Null)`. It returned `ZBError::ApiError` with status 204 and `Empty response from ZeroBounce (HTTP 204)`, although the test was deleted. The Go SDK already treats it as a success. The other Inbox Placement calls must return data, so an empty 2xx on them is still an error. Affects 3.0.0 to 4.0.1.
+
 ## [4.0.1] - 2026-11-11
 
 ### Changed
