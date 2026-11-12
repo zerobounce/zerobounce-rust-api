@@ -69,7 +69,7 @@ fn secret_forms(secret: &str) -> Vec<String> {
 }
 
 /// Mask every `api_key=` value in a message, whichever key it holds.
-fn mask_api_key_parameters(text: &str) -> String {
+fn scrub_query_string_values(text: &str) -> String {
     // ASCII lowercasing keeps every byte offset, so indexes found in `lower`
     // are char boundaries in `text` too.
     let lower = text.to_ascii_lowercase();
@@ -104,7 +104,7 @@ pub(crate) fn redact_secrets(text: &str, secrets: &[&str]) -> String {
             }
         }
     }
-    mask_api_key_parameters(&value)
+    scrub_query_string_values(&value)
 }
 
 /// The HTTP client both API clients use: explicit timeout, redirects never
