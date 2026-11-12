@@ -223,7 +223,7 @@ impl ZeroBounce {
                 };
                 // The account-level failure arrives on an HTTP 200; carry it so
                 // status_code() is Some, like every other failed response.
-                return Err(ZBError::api(status, message));
+                return Err(self.redact_error(ZBError::api(status, message)));
             }
         }
         Ok(validation)

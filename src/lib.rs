@@ -181,6 +181,12 @@ impl ZeroBounce {
         utility::check_key_text(&self.api_key)
     }
 
+    /// `error` with this client's key masked in its message. Every error built
+    /// from a response body passes through here.
+    fn redact_error(&self, error: ZBError) -> ZBError {
+        error.redacted(&[self.api_key.as_str()])
+    }
+
     fn read_api_response(&self, response: reqwest::blocking::Response) -> ZBResult<String> {
         self.read_api_response_checked(response, false)
     }
@@ -191,9 +197,11 @@ impl ZeroBounce {
         message_only_is_failure: bool,
     ) -> ZBResult<String> {
         let (status, content_type, response_content) = Self::read_api_body(response)?;
-        utility::http_error::ensure_json_api_body(status, &content_type, &response_content)?;
+        utility::http_error::ensure_json_api_body(status, &content_type, &response_content)
+            .map_err(|error| self.redact_error(error))?;
         if message_only_is_failure {
-            utility::http_error::reject_message_only_body(status, &content_type, &response_content)?;
+            utility::http_error::reject_message_only_body(status, &content_type, &response_content)
+                .map_err(|error| self.redact_error(error))?;
         }
         Ok(response_content)
     }

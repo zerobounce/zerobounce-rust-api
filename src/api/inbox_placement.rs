@@ -288,7 +288,8 @@ impl ZeroBounce {
         if empty_2xx_is_success && (200..300).contains(&status) && content.trim().is_empty() {
             return Ok(Value::Null);
         }
-        crate::utility::http_error::ensure_json_api_body(status, &content_type, &content)?;
+        crate::utility::http_error::ensure_json_api_body(status, &content_type, &content)
+            .map_err(|error| self.redact_error(error))?;
         crate::utility::http_error::parse_json_body(&content)
     }
 }
