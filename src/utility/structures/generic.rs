@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use serde::Deserialize;
 
-use crate::utility::structures::custom_deserialize::deserialize_only_date;
+use crate::utility::structures::custom_deserialize::{deserialize_only_date, null_as_default};
 use crate::utility::structures::custom_deserialize::deserialize_stringified_uint;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -128,6 +128,7 @@ pub struct FindEmailResponse {
     pub confidence: String,
     pub did_you_mean: String,
     pub failure_reason: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub other_domain_formats: Vec<DomainFormats>,
 }
 
@@ -166,7 +167,7 @@ pub struct DomainSearchResponseV2 {
     pub did_you_mean: String,
     #[serde(default)]
     pub failure_reason: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub other_domain_formats: Vec<DomainFormats>,
 }
 

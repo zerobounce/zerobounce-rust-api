@@ -8,3 +8,5 @@ mod bulk;
 mod common;
 mod generic_endpoints;
 mod validation;
+mod null_fields;
+mod documented_examples;

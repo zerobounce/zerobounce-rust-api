@@ -7,13 +7,15 @@ use reqwest::blocking::multipart::{Form, Part};
 
 use serde::Deserialize;
 
-use crate::utility::structures::custom_deserialize::deserialize_date_rfc;
+use crate::utility::structures::custom_deserialize::{deserialize_date_rfc, deserialize_message_text, null_as_default};
 use crate::utility::structures::custom_deserialize::deserialize_percentage_float;
 use crate::utility::{ZBError, ZBResult};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBFileFeedback {
     pub success: bool,
+    /// A list of messages from the API is joined with newlines.
+    #[serde(deserialize_with = "deserialize_message_text")]
     pub message: String,
     pub file_name: Option<String>,
     pub file_id: Option<String>,
@@ -22,6 +24,7 @@ pub struct ZBFileFeedback {
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBFileStatus {
     pub success: bool,
+    #[serde(deserialize_with = "null_as_default")]
     pub file_id: String,
     pub file_name: String,
     pub file_status: String,

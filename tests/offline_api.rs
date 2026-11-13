@@ -348,6 +348,9 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
     if key.starts_with("false-string-") {
         return (200, "application/json", r#"{"success":"false","message":"File not found."}"#.to_string());
     }
+    if key.starts_with("capital-false-string-") {
+        return (200, "application/json", r#"{"success":"False","message":"File not found."}"#.to_string());
+    }
     if key.starts_with("csv-as-json-") {
         return (200, "application/json", "email,status\na@example.com,valid\n".to_string());
     }
@@ -2739,6 +2742,43 @@ fn success_false_as_a_string_is_an_error_on_every_call() {
     }
 }
 
+/// `{"success": "False"}` (capitalised, as the bulk endpoints send it) is a failure too.
+#[test]
+fn capitalised_success_false_as_a_string_is_an_error_on_every_call() {
+    let (port, _fake) = start_fake();
+    let results = sweep_with_key(port, "capital-false-string-key");
+    assert!(!results.is_empty());
+    for (name, result) in results {
+        assert_status_200(name, &result);
+        assert!(result.unwrap_err().to_string().contains("File not found."), "{name}");
+    }
+}
+
+/// `return_url` is sent only when the caller set one (the JS guard
+/// `if (return_url)` has a Rust twin in `ZBFile::generate_multipart_with`).
+#[test]
+fn sendfile_omits_return_url_unless_the_caller_sets_one() {
+    let (port, fake) = start_fake();
+    let zb = client(port, "return-url-key");
+    let file = ZBFile::from_content(b"email\na@example.com\n".to_vec());
+    zb.bulk_validation_file_submit(&file).unwrap();
+    assert!(!only(&fake).fields.contains_key("return_url"));
+    zb.ai_scoring_file_submit(&file).unwrap();
+    assert!(!only(&fake).fields.contains_key("return_url"));
+
+    let file = file.set_return_url(Some("https://example.com/hook"));
+    zb.bulk_validation_file_submit(&file).unwrap();
+    assert_eq!(
+        only(&fake).fields.get("return_url").map(String::as_str),
+        Some("https://example.com/hook")
+    );
+    zb.ai_scoring_file_submit(&file).unwrap();
+    assert_eq!(
+        only(&fake).fields.get("return_url").map(String::as_str),
+        Some("https://example.com/hook")
+    );
+}
+
 /// `ZBFile` always sends `remove_duplicate`, with the caller's value and
 /// `false` when it is not set: the default every released version (4.0.x and
 /// earlier) sent, kept because changing a released default is a breaking
@@ -3227,7 +3267,13 @@ fn nested_type_bodies() -> Vec<(&'static str, String, String)> {
         let document: serde_json::Value = serde_json::from_str(&example).unwrap();
         for path in every_nested_path(&document, &[]) {
             let mut original = document.clone();
+            // A file job's `message` may be a string or a list of strings, so a list
+            // there is an accepted shape, not a wrong type (standard.md §3).
+            let is_message = format!("{path:?}").ends_with("String(\"message\")]");
             for wrong in wrong_types_for(value_at_mut(&mut original, &path)) {
+                if is_message && wrong == serde_json::json!([]) {
+                    continue;
+                }
                 let mut changed = document.clone();
                 *value_at_mut(&mut changed, &path) = wrong.clone();
                 bodies.push((group, changed.to_string(), format!("{path:?} = {wrong}")));

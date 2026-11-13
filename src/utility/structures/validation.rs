@@ -1,7 +1,7 @@
 use chrono::NaiveDateTime;
 use serde::Deserialize;
 
-use crate::utility::structures::custom_deserialize::deserialize_naive_date;
+use crate::utility::structures::custom_deserialize::{deserialize_naive_date, null_as_default};
 use crate::utility::structures::validate_enums::{ZBValidateStatus, ZBValidateSubStatus};
 
 
@@ -81,7 +81,9 @@ pub struct ZBBatchError {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBBatchValidation {
+    #[serde(deserialize_with = "null_as_default")]
     pub email_batch: Vec<ZBValidation>,
+    #[serde(deserialize_with = "null_as_default")]
     pub errors: Vec<ZBBatchError>,
 }
 
