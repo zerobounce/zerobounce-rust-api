@@ -444,11 +444,9 @@ mod redaction_tests {
             // Four layers: four percent-encodings of '/', the last one with %25.
             ("four layers", "k/y", "echo k%2525252fy end"),
         ];
-        for (name, secret, text) in cases {
-            assert!(
-                super::secret_survives_decoding(text, &[secret]),
-                "{name}: {text:?} not caught for {secret:?}"
-            );
+        for (name, needle, text) in cases {
+            let caught = super::secret_survives_decoding(text, &[needle]);
+            assert!(caught, "decode step not covered: {name}");
         }
         // Five layers is past the promise: the text is kept, so the depth is
         // exactly four and the check is not dropping every escaped text.
