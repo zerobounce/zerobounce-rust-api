@@ -276,8 +276,98 @@ pub const UNEXPECTED_JSON_SHAPE_MESSAGE: &str =
 /// fit is the API's answer, not a transport or SDK error: a
 /// [`ZBError::ApiError`] with status 200 and [`UNEXPECTED_JSON_SHAPE_MESSAGE`].
 /// The message carries no body content.
+///
+/// A JSON array is never read into a struct: serde's derived structs also
+/// take their fields positionally from an array (`["x"]` would fill the first
+/// field), so the body is read through [`ObjectsOnly`], which offers a struct
+/// only a JSON object, at every depth.
 pub fn parse_json_body<T: serde::de::DeserializeOwned>(body: &str) -> ZBResult<T> {
-    serde_json::from_str(body).map_err(|_| ZBError::api(200, UNEXPECTED_JSON_SHAPE_MESSAGE))
+    serde_json::from_str::<serde_json::Value>(body)
+        .and_then(|value| T::deserialize(ObjectsOnly(value)))
+        .map_err(|_| ZBError::api(200, UNEXPECTED_JSON_SHAPE_MESSAGE))
+}
+
+/// A [`serde_json::Value`] deserializer that refuses an array where a struct
+/// is expected, at every depth. Everything else behaves as the `Value`'s own
+/// deserializer: the values inside objects and arrays are `ObjectsOnly` too.
+struct ObjectsOnly(serde_json::Value);
+
+impl<'de> serde::Deserializer<'de> for ObjectsOnly {
+    type Error = serde_json::Error;
+
+    fn deserialize_any<V: serde::de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        match self.0 {
+            serde_json::Value::Array(items) => {
+                let mut seq = serde::de::value::SeqDeserializer::<_, serde_json::Error>::new(
+                    items.into_iter().map(ObjectsOnly),
+                );
+                let value = visitor.visit_seq(&mut seq)?;
+                seq.end()?;
+                Ok(value)
+            }
+            serde_json::Value::Object(members) => {
+                let mut map = serde::de::value::MapDeserializer::<_, serde_json::Error>::new(
+                    members.into_iter().map(|(key, value)| (key, ObjectsOnly(value))),
+                );
+                let value = visitor.visit_map(&mut map)?;
+                map.end()?;
+                Ok(value)
+            }
+            other => other.deserialize_any(visitor),
+        }
+    }
+
+    fn deserialize_struct<V: serde::de::Visitor<'de>>(
+        self,
+        name: &'static str,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error> {
+        match self.0 {
+            serde_json::Value::Object(_) => self.deserialize_any(visitor),
+            serde_json::Value::Array(_) => {
+                Err(serde::de::Error::invalid_type(serde::de::Unexpected::Seq, &visitor))
+            }
+            other => other.deserialize_struct(name, fields, visitor),
+        }
+    }
+
+    fn deserialize_option<V: serde::de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        match self.0 {
+            serde_json::Value::Null => visitor.visit_none(),
+            _ => visitor.visit_some(self),
+        }
+    }
+
+    fn deserialize_newtype_struct<V: serde::de::Visitor<'de>>(
+        self,
+        _name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Self::Error> {
+        visitor.visit_newtype_struct(self)
+    }
+
+    fn deserialize_enum<V: serde::de::Visitor<'de>>(
+        self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error> {
+        self.0.deserialize_enum(name, variants, visitor)
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf unit unit_struct seq tuple tuple_struct map identifier ignored_any
+    }
+}
+
+impl<'de> serde::de::IntoDeserializer<'de, serde_json::Error> for ObjectsOnly {
+    type Deserializer = Self;
+
+    fn into_deserializer(self) -> Self {
+        self
+    }
 }
 
 #[cfg(test)]

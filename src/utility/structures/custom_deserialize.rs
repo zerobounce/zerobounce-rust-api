@@ -9,9 +9,9 @@ pub(crate) fn deserialize_naive_date<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    let string: &str = serde::Deserialize::deserialize(deserializer)?;
+    let string: String = serde::Deserialize::deserialize(deserializer)?;
     let format = "%Y-%m-%d %H:%M:%S.%3f";
-    NaiveDateTime::parse_from_str(string, format)
+    NaiveDateTime::parse_from_str(&string, format)
         .map_err(SerdeError::custom)
 }
 
@@ -22,9 +22,9 @@ pub(crate) fn deserialize_only_date<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    let string: &str = serde::Deserialize::deserialize(deserializer)?;
+    let string: String = serde::Deserialize::deserialize(deserializer)?;
     let format = "%m/%d/%Y";
-    NaiveDate::parse_from_str(string, format)
+    NaiveDate::parse_from_str(&string, format)
         .map_err(SerdeError::custom)
 }
 
@@ -34,7 +34,7 @@ pub(crate) fn deserialize_stringified_uint<'de, D>(
 where
     D: serde::Deserializer<'de>,
 {
-    let optional_string: Option<&str> = serde::Deserialize::deserialize(deserializer)?;
+    let optional_string: Option<String> = serde::Deserialize::deserialize(deserializer)?;
 
     if optional_string.is_none() {
         return Ok(None);
@@ -55,8 +55,8 @@ pub(crate) fn deserialize_date_rfc<'de, D>(
 where
     D: serde::Deserializer<'de>
 {
-    let string: &str = serde::Deserialize::deserialize(deserializer)?;
-    DateTime::parse_from_rfc3339(string).map_err(SerdeError::custom)
+    let string: String = serde::Deserialize::deserialize(deserializer)?;
+    DateTime::parse_from_rfc3339(&string).map_err(SerdeError::custom)
 }
 
 // Expecting a
@@ -64,7 +64,7 @@ pub(crate) fn deserialize_percentage_float<'de, D>(deserializer: D) -> Result<f3
 where
     D: serde::Deserializer<'de>
 {
-    let string: &str = serde::Deserialize::deserialize(deserializer)?;
+    let string: String = serde::Deserialize::deserialize(deserializer)?;
 
     let raw_error = SerdeError::custom("invalid percentage amount");
     let first_part = string.split('%').next().ok_or(raw_error)?;

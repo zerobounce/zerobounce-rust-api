@@ -1,6 +1,6 @@
 mod encoded_secrets;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -308,6 +308,14 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
         .and_then(|index| index.parse::<usize>().ok())
     {
         return (200, "application/json", field_type_bodies()[index].2.clone());
+    }
+    // "nested-<n>-key": body n of nested_type_bodies(), as a JSON 200.
+    if let Some(index) = key
+        .strip_prefix("nested-")
+        .and_then(|rest| rest.split('-').next())
+        .and_then(|index| index.parse::<usize>().ok())
+    {
+        return (200, "application/json", nested_type_bodies()[index].1.clone());
     }
     // "corpus-<n>-key": line n of the strict JSON corpus, as a JSON 200.
     if let Some(index) = key
@@ -2886,8 +2894,28 @@ fn every_encoding_of_the_key_is_kept_out_of_every_error() {
     assert!(leaked.is_empty(), "{} errors leak the key: {:#?}", leaked.len(), &leaked[..leaked.len().min(5)]);
 }
 
-/// Strict JSON bodies of the wrong shape for every typed call.
-const WRONG_SHAPES: [&str; 6] = ["null", " null ", "0", "true", "\"x\"", "[1]"];
+/// Strict JSON bodies of the wrong shape for every typed call. A JSON array
+/// is never read positionally into a result struct, so `["x"]` and the
+/// positional arrays are refused too. `[]` and `{}` (the last two) are
+/// checked by the result type: `[]` is refused by every call whose result is
+/// a struct, and `{}` by every call whose result is a list.
+const WRONG_SHAPES: [&str; 12] = [
+    "null", " null ", "0", "true", "\"x\"", "[1]",
+    r#"["x"]"#, r#"["a@example.com",10]"#, r#"[true,"3"]"#, r#"[{}]"#,
+    "[]", "{}",
+];
+
+/// What a call's result is, read from its `Debug` output for `[]`: raw JSON
+/// (a `serde_json::Value` prints `Array []`, a `String` prints quoted), a
+/// list (`[]`), or a struct (`Name { .. }`, or an error, since a struct must
+/// refuse `[]`).
+fn result_kind(result: &Result<String, ZBError>) -> &'static str {
+    match result {
+        Ok(debug) if debug.starts_with("Array") || debug.starts_with('"') => "raw",
+        Ok(debug) if debug.starts_with('[') => "list",
+        _ => "struct",
+    }
+}
 
 /// A 2xx body that is strict JSON but the wrong shape for the call is an
 /// ApiError with status 200 on every typed call: never a result, a
@@ -2902,11 +2930,21 @@ fn every_typed_call_refuses_json_of_the_wrong_shape() {
         .filter(|(_, result)| result.is_ok())
         .map(|(name, _)| name)
         .collect();
+    let (empty_list, empty_object) = (WRONG_SHAPES.len() - 2, WRONG_SHAPES.len() - 1);
+    let kinds: BTreeMap<&str, &str> = sweep_with_key(port, &format!("shape-{empty_list}-key"))
+        .iter()
+        .map(|(name, result)| (*name, result_kind(result)))
+        .collect();
     let mut wrong = Vec::new();
     let mut typed = BTreeSet::new();
     for (index, shape) in WRONG_SHAPES.iter().enumerate() {
         for (name, result) in sweep_with_key(port, &format!("shape-{index}-key")) {
-            if downloads.contains(name) || raw.contains(name) {
+            let kind = kinds[name];
+            if downloads.contains(name) || raw.contains(name) || kind == "raw" {
+                continue;
+            }
+            // [] is a list's answer and {} a struct's.
+            if (index == empty_list && kind == "list") || (index == empty_object && kind == "struct") {
                 continue;
             }
             typed.insert(name);
@@ -2917,22 +2955,57 @@ fn every_typed_call_refuses_json_of_the_wrong_shape() {
             }
         }
     }
+    let lists: Vec<_> = kinds.iter().filter(|(_, kind)| **kind == "list").collect();
     assert!(typed.len() >= 30, "only {} typed calls: {typed:?}", typed.len());
+    assert!(lists.len() <= 2, "{} calls take a list: {lists:?}", lists.len());
     assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
 }
 
 const DOCS_VALIDATE_RESPONSE: &str = r#"{"address":"flowerjill@aol.com","status":"valid","sub_status":"","free_email":true,"did_you_mean":null,"account":"flowerjill","domain":"aol.com","domain_age_days":"8426","active_in_days":"100","smtp_provider":"yahoo","mx_record":"mx-aol.mail.gm0.yahoodns.net","mx_found":"true","firstname":"Jill","lastname":"Stein","gender":"female","country":"United States","region":"Florida","city":"West Palm Beach","zipcode":"33401","processed_at":"2017-04-01 02:48:02.592"}"#;
 
+/// zerobounce.net's own getcredits example, verbatim (v2-credit-balance,
+/// "Response"): `Credits` as a JSON integer.
+const DOCS_CREDITS_RESPONSE: &str = r#"{"Credits":2375323}"#;
+
+/// `Credits` is an integer sent as a JSON string (as the live API sends it)
+/// or as a JSON integer (as the documentation shows), with the value
+/// `get_credits` returns for it.
+const ACCEPTED_CREDITS: [(&str, i64); 7] = [
+    (DOCS_CREDITS_RESPONSE, 2375323),
+    (r#"{"Credits":"2375323"}"#, 2375323),
+    (r#"{"Credits":"-1"}"#, -1),
+    (r#"{"Credits":"0"}"#, 0),
+    (r#"{"Credits":-1}"#, -1),
+    (r#"{"Credits":0}"#, 0),
+    (r#"{"Credits": 12345 }"#, 12345),
+];
+
+/// get_credits returns the integer whether `Credits` is a JSON string or a
+/// JSON integer.
+#[test]
+fn get_credits_reads_credits_as_a_string_or_an_integer() {
+    let (port, _fake) = start_fake();
+    for (index, (_, _, body)) in field_type_bodies().iter().enumerate() {
+        if let Some((_, expected)) = ACCEPTED_CREDITS.iter().find(|(accepted, _)| accepted == body) {
+            let credits = client(port, &format!("fields-{index}-key")).get_credits();
+            assert_eq!(credits.ok(), Some(*expected), "{body}");
+        }
+    }
+}
+
 /// (calls, accepted, body) for credits_and_validate_fields_have_their_documented_types.
 fn field_type_bodies() -> Vec<(&'static str, bool, String)> {
     let mut bodies = Vec::new();
     for body in [
-        "{}", r#"{"Credits":null}"#, r#"{"Credits":true}"#, r#"{"Credits":5}"#, r#"{"Credits":"abc"}"#,
+        "{}", r#"{"Credits":null}"#, r#"{"Credits":true}"#, r#"{"Credits":"abc"}"#,
         r#"{"Credits":"5.0"}"#, r#"{"Credits":""}"#, r#"{"Credits":" 5"}"#, r#"{"Credits":{}}"#, r#"{"other":"5"}"#,
+        r#"{"Credits":5.5}"#, r#"{"Credits":5.0}"#, r#"{"Credits":1e3}"#, r#"{"Credits":-0.5}"#,
+        r#"{"Credits":[]}"#, r#"{"Credits":[5]}"#,
+        r#"{"Credits":"9223372036854775808"}"#, r#"{"Credits":9223372036854775808}"#,
     ] {
         bodies.push(("credits", false, body.to_string()));
     }
-    for body in [r#"{"Credits":"2375323"}"#, r#"{"Credits":"-1"}"#, r#"{"Credits":"0"}"#] {
+    for (body, _) in ACCEPTED_CREDITS {
         bodies.push(("credits", true, body.to_string()));
     }
     let refused_rows = [
@@ -2963,11 +3036,29 @@ fn field_type_bodies() -> Vec<(&'static str, bool, String)> {
         bodies.push(("validate", true, body.to_string()));
     }
     bodies.push(("batch", true, format!(r#"{{"email_batch":[{DOCS_VALIDATE_RESPONSE}],"errors":[]}}"#)));
+    // A batch row that is not an object at all.
+    for row in ["5", "null", "\"x\"", "[]", "true", r#"["a@b.c","valid"]"#] {
+        bodies.push(("batch", false, format!(r#"{{"email_batch":[{row}],"errors":[]}}"#)));
+        bodies.push(("batch", false, format!(r#"{{"email_batch":[{DOCS_VALIDATE_RESPONSE},{row}],"errors":[]}}"#)));
+    }
+    // A nested object (an other_domain_formats item) is never read
+    // positionally from an array either.
+    let finder = |formats: &str| {
+        format!(
+            r#"{{"email":"john@example.com","domain":"example.com","company_name":"Example","format":"first","status":"valid","sub_status":"","confidence":"high","did_you_mean":"","failure_reason":"","other_domain_formats":{formats}}}"#
+        )
+    };
+    for formats in [r#"[["first.last","medium"]]"#, r#"[[]]"#, "[5]", r#"["x"]"#, "[null]"] {
+        bodies.push(("formats", false, finder(formats)));
+    }
+    for formats in ["[]", r#"[{"format":"first.last","confidence":"medium"}]"#] {
+        bodies.push(("formats", true, finder(formats)));
+    }
     bodies
 }
 
 /// Field types are part of the shape (standard.md §3): `get_credits` needs
-/// `Credits` as a JSON string holding an integer, and validate (and each
+/// `Credits` as an integer, sent as a JSON string or a JSON integer, and validate (and each
 /// batch row) needs `address` and `status` strings, except the greylist
 /// `{"Message": ...}` answer. Anything else is an ApiError with status 200;
 /// the documented responses still parse. The calls come from the complete
@@ -2982,6 +3073,7 @@ fn credits_and_validate_fields_have_their_documented_types() {
             let in_group = match *group {
                 "credits" => name.contains("credits"),
                 "validate" => name.starts_with("validate_email"),
+                "formats" => ["find_email", "domain_search", "domain_search_v2"].contains(&name),
                 _ => name.starts_with("batch_validate"),
             };
             if !in_group {
@@ -2998,7 +3090,210 @@ fn credits_and_validate_fields_have_their_documented_types() {
             }
         }
     }
-    assert!(seen.len() >= 6, "sweep found only {seen:?}");
+    assert!(seen.len() >= 9, "sweep found only {seen:?}");
+    assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
+}
+
+// Documented response examples, copied verbatim from zerobounce.net/docs
+// (the "Response" samples of each endpoint page).
+const DOCS_VALIDATE_EXAMPLE: &str = r#"{
+      "address": "john.doe@zerobounce.net",
+      "status": "valid",
+      "sub_status": "",
+      "free_email": false,
+      "catchall_domain": true,
+      "did_you_mean": null,
+      "account": "johndoe",
+      "domain": "zerobounce.net",
+      "domain_age_days": "3431",
+      "active_in_days": "30",
+      "active_first_seen": "2026-02-25",
+      "smtp_provider": "g-suite",
+      "mx_found": "true",
+      "mx_record": "aspmx.l.google.com",
+      "firstname": "dan",
+      "lastname": "cotet",
+      "gender": "male",
+      "country": null,
+      "region": null,
+      "city": null,
+      "zipcode": null,
+      "processed_at": "2026-06-18 07:05:00.033"
+  }"#;
+const DOCS_FILE_STATUS_EXAMPLE: &str = r#"{
+    "success": true,
+    "file_id": "aaaaaaaa-zzzz-xxxx-yyyy-5003727fffff",
+    "file_name": "Your file name.csv",
+    "upload_date": "2023-04-28T15:25:41Z",
+    "file_status": "Complete",
+    "file_phase_2_status": "Complete",
+    "complete_percentage": "100%",
+    "return_url": "Your return URL if provided when calling sendfile API"
+  }"#;
+const DOCS_SCORING_FILE_STATUS_EXAMPLE: &str = r#"{
+          "success": true,
+          "file_id": "aaaaaaaa-zzzz-xxxx-yyyy-5003727fffff",
+          "file_name": "Your file name.csv",
+          "upload_date": "2023-04-28T15:25:41Z",
+          "file_status": "Complete",
+          "complete_percentage": "100%",
+          "return_url": "Your return URL if provided when calling sendfile API"
+      }"#;
+const DOCS_SEND_FILE_EXAMPLE: &str = r#"{
+      "success": true,
+      "message": "File Accepted",
+      "file_name": "Your file name.csv",
+      "file_id": "aaaaaaaa-zzzz-xxxx-yyyy-5003727fffff"
+    }"#;
+const DOCS_DELETE_FILE_EXAMPLE: &str = r#"{
+    "success": true,
+    "message": "File Deleted",
+    "file_name": "test2",
+    "file_id": "b222a0fd-90d5-416c-8f1a-9cc3851fc823"
+  }"#;
+
+/// Each documented example with the group of calls that returns it.
+fn documented_examples() -> Vec<(&'static str, String)> {
+    vec![
+        ("credits", DOCS_CREDITS_RESPONSE.to_string()),
+        ("validate", DOCS_VALIDATE_EXAMPLE.to_string()),
+        (
+            "batch",
+            format!(r#"{{"email_batch":[{DOCS_VALIDATE_EXAMPLE}],"errors":[{{"error":"Invalid email","email_address":"bad@"}}]}}"#),
+        ),
+        ("file_status", DOCS_FILE_STATUS_EXAMPLE.to_string()),
+        ("scoring_file_status", DOCS_SCORING_FILE_STATUS_EXAMPLE.to_string()),
+        ("sendfile", DOCS_SEND_FILE_EXAMPLE.to_string()),
+        ("deletefile", DOCS_DELETE_FILE_EXAMPLE.to_string()),
+    ]
+}
+
+/// Every place below the root of a JSON document, as object keys and array
+/// indexes: object members, array items and everything inside them.
+fn every_nested_path(value: &serde_json::Value, prefix: &[serde_json::Value]) -> Vec<Vec<serde_json::Value>> {
+    let children: Vec<(serde_json::Value, &serde_json::Value)> = match value {
+        serde_json::Value::Object(members) => members.iter().map(|(key, item)| (key.as_str().into(), item)).collect(),
+        serde_json::Value::Array(items) => items.iter().enumerate().map(|(index, item)| (index.into(), item)).collect(),
+        _ => Vec::new(),
+    };
+    let mut paths = Vec::new();
+    for (step, child) in children {
+        let mut path = prefix.to_vec();
+        path.push(step);
+        let below = every_nested_path(child, &path);
+        paths.push(path);
+        paths.extend(below);
+    }
+    paths
+}
+
+fn value_at_mut<'a>(mut value: &'a mut serde_json::Value, path: &[serde_json::Value]) -> &'a mut serde_json::Value {
+    for step in path {
+        value = match step {
+            serde_json::Value::String(key) => value.get_mut(key.as_str()).unwrap(),
+            index => value.get_mut(index.as_u64().unwrap() as usize).unwrap(),
+        };
+    }
+    value
+}
+
+/// One value of every JSON type other than `original`'s. null is left out
+/// (it is accepted for optional fields); a null in an example stands for a
+/// string that is not known.
+fn wrong_types_for(original: &serde_json::Value) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    let kind = match original {
+        serde_json::Value::Null | serde_json::Value::String(_) => 0,
+        serde_json::Value::Number(_) => 1,
+        serde_json::Value::Bool(_) => 2,
+        serde_json::Value::Object(_) => 3,
+        serde_json::Value::Array(_) => 4,
+    };
+    [json!("x"), json!(5), json!(true), json!({}), json!([])]
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| *index != kind)
+        .map(|(_, value)| value)
+        .collect()
+}
+
+/// (group, body, path) for a_wrong_json_type_at_any_nested_path_of_a_documented_example_is_an_error:
+/// each documented example as published, then with a value of every other
+/// JSON type at every nested path.
+fn nested_type_bodies() -> Vec<(&'static str, String, String)> {
+    let mut bodies = Vec::new();
+    for (group, example) in documented_examples() {
+        bodies.push((group, example.clone(), String::new()));
+        let document: serde_json::Value = serde_json::from_str(&example).unwrap();
+        for path in every_nested_path(&document, &[]) {
+            let mut original = document.clone();
+            for wrong in wrong_types_for(value_at_mut(&mut original, &path)) {
+                let mut changed = document.clone();
+                *value_at_mut(&mut changed, &path) = wrong.clone();
+                bodies.push((group, changed.to_string(), format!("{path:?} = {wrong}")));
+            }
+        }
+    }
+    bodies
+}
+
+/// The calls that return each documented example.
+fn calls_returning(group: &str, zb: &ZeroBounce) -> Vec<(&'static str, Result<String, ZBError>)> {
+    fn debug<T: std::fmt::Debug>(result: Result<T, ZBError>) -> Result<String, ZBError> {
+        result.map(|value| format!("{value:?}"))
+    }
+    let post = ZBValidateOptions { use_post: true, ..Default::default() };
+    let file = ZBFile::from_content(b"email\na@example.com\n".to_vec());
+    let batch = || vec![("a@example.com".to_string(), String::new())];
+    match group {
+        "credits" => vec![("get_credits", debug(zb.get_credits()))],
+        "validate" => vec![
+            ("validate_email", debug(zb.validate_email("a@example.com"))),
+            ("validate_email_and_ip", debug(zb.validate_email_and_ip("a@example.com", "1.1.1.1"))),
+            ("validate_email_with_options", debug(zb.validate_email_with_options("a@example.com", "", &post))),
+        ],
+        "batch" => vec![
+            ("batch_validate", debug(zb.batch_validate(batch()))),
+            ("batch_validate_with_options", debug(zb.batch_validate_with_options(batch(), &post))),
+        ],
+        "file_status" => vec![("bulk_validation_file_status_check", debug(zb.bulk_validation_file_status_check("fid")))],
+        "scoring_file_status" => vec![("ai_scoring_file_status_check", debug(zb.ai_scoring_file_status_check("fid")))],
+        "sendfile" => vec![
+            ("bulk_validation_file_submit", debug(zb.bulk_validation_file_submit(&file))),
+            ("ai_scoring_file_submit", debug(zb.ai_scoring_file_submit(&file))),
+        ],
+        "deletefile" => vec![
+            ("bulk_validation_result_delete", debug(zb.bulk_validation_result_delete("fid"))),
+            ("ai_scoring_result_delete", debug(zb.ai_scoring_result_delete("fid"))),
+        ],
+        other => panic!("no calls for {other}"),
+    }
+}
+
+/// Field types are part of the shape at every depth (standard.md §3): every
+/// documented example parses, and a value of any other JSON type at any
+/// nested path of it (a field, a batch row, a field inside a row, an array
+/// item) is an ApiError with status 200 on every call that returns it.
+#[test]
+fn a_wrong_json_type_at_any_nested_path_of_a_documented_example_is_an_error() {
+    let (port, _fake) = start_fake();
+    let mut wrong = Vec::new();
+    let mut groups = BTreeSet::new();
+    for (index, (group, _, change)) in nested_type_bodies().iter().enumerate() {
+        groups.insert(*group);
+        let accepted = change.is_empty();
+        for (name, result) in calls_returning(group, &client(port, &format!("nested-{index}-key"))) {
+            let ok = match &result {
+                Ok(_) => accepted,
+                Err(error @ ZBError::ApiError { .. }) => !accepted && error.status_code() == Some(200),
+                Err(_) => false,
+            };
+            if !ok {
+                wrong.push(format!("{name} {change}: {result:?}"));
+            }
+        }
+    }
+    assert_eq!(groups.len(), documented_examples().len());
     assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
 }
 

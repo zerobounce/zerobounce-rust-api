@@ -63,15 +63,20 @@ pub struct DomainSearchV2Builder<'a> {
 
 impl ZeroBounce {
 
-    /// The `Credits` value of a 2xx body. A body without a `Credits` string
-    /// holding a whole number is JSON of the wrong shape: a
-    /// [`ZBError::ApiError`] with status 200, like on every other call.
+    /// The `Credits` value of a 2xx body: an integer sent as a JSON string
+    /// (`"-1"`, `"12345"`, as the live API sends it) or as a JSON integer
+    /// (`{"Credits":2375323}`, zerobounce.net's own example). Anything else
+    /// (missing, `null`, `5.5`, `5.0`, `"abc"`, another JSON type, out of
+    /// `i64` range) is JSON of the wrong shape: a [`ZBError::ApiError`] with
+    /// status 200, like on every other call.
     fn get_credits_from_string(string_value: String) -> ZBResult<i64> {
-        crate::utility::http_error::parse_json_body::<serde_json::Value>(&string_value)?
-            .get("Credits")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|credits| credits.parse::<i64>().ok())
-            .ok_or_else(|| ZBError::api(200, crate::utility::http_error::UNEXPECTED_JSON_SHAPE_MESSAGE))
+        let body = crate::utility::http_error::parse_json_body::<serde_json::Value>(&string_value)?;
+        match body.get("Credits") {
+            Some(serde_json::Value::String(credits)) => credits.parse::<i64>().ok(),
+            Some(serde_json::Value::Number(credits)) => credits.as_i64(),
+            _ => None,
+        }
+        .ok_or_else(|| ZBError::api(200, crate::utility::http_error::UNEXPECTED_JSON_SHAPE_MESSAGE))
     }
 
     pub fn get_credits(&self) -> ZBResult<i64> {
