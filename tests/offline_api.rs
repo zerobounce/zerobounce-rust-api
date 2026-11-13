@@ -293,6 +293,22 @@ fn answer(path: &str, key: &str) -> (u16, &'static str, String) {
     {
         return (200, "application/json", WRONG_SHAPES[index].to_string());
     }
+    // "deadbody-<n>-key": dead-key body n (DEAD_KEY_BODIES), as a JSON 200.
+    if let Some(index) = key
+        .strip_prefix("deadbody-")
+        .and_then(|rest| rest.split('-').next())
+        .and_then(|index| index.parse::<usize>().ok())
+    {
+        return (200, "application/json", DEAD_KEY_BODIES[index].to_string());
+    }
+    // "fields-<n>-key": body n of field_type_bodies(), as a JSON 200.
+    if let Some(index) = key
+        .strip_prefix("fields-")
+        .and_then(|rest| rest.split('-').next())
+        .and_then(|index| index.parse::<usize>().ok())
+    {
+        return (200, "application/json", field_type_bodies()[index].2.clone());
+    }
     // "corpus-<n>-key": line n of the strict JSON corpus, as a JSON 200.
     if let Some(index) = key
         .strip_prefix("corpus-")
@@ -2902,6 +2918,117 @@ fn every_typed_call_refuses_json_of_the_wrong_shape() {
         }
     }
     assert!(typed.len() >= 30, "only {} typed calls: {typed:?}", typed.len());
+    assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
+}
+
+const DOCS_VALIDATE_RESPONSE: &str = r#"{"address":"flowerjill@aol.com","status":"valid","sub_status":"","free_email":true,"did_you_mean":null,"account":"flowerjill","domain":"aol.com","domain_age_days":"8426","active_in_days":"100","smtp_provider":"yahoo","mx_record":"mx-aol.mail.gm0.yahoodns.net","mx_found":"true","firstname":"Jill","lastname":"Stein","gender":"female","country":"United States","region":"Florida","city":"West Palm Beach","zipcode":"33401","processed_at":"2017-04-01 02:48:02.592"}"#;
+
+/// (calls, accepted, body) for credits_and_validate_fields_have_their_documented_types.
+fn field_type_bodies() -> Vec<(&'static str, bool, String)> {
+    let mut bodies = Vec::new();
+    for body in [
+        "{}", r#"{"Credits":null}"#, r#"{"Credits":true}"#, r#"{"Credits":5}"#, r#"{"Credits":"abc"}"#,
+        r#"{"Credits":"5.0"}"#, r#"{"Credits":""}"#, r#"{"Credits":" 5"}"#, r#"{"Credits":{}}"#, r#"{"other":"5"}"#,
+    ] {
+        bodies.push(("credits", false, body.to_string()));
+    }
+    for body in [r#"{"Credits":"2375323"}"#, r#"{"Credits":"-1"}"#, r#"{"Credits":"0"}"#] {
+        bodies.push(("credits", true, body.to_string()));
+    }
+    let refused_rows = [
+        "{}",
+        r#"{"address":true,"status":"valid"}"#,
+        r#"{"address":"a@b.c","status":5}"#,
+        r#"{"address":null,"status":"valid"}"#,
+        r#"{"address":"a@b.c","status":null}"#,
+        r#"{"address":"a@b.c"}"#,
+        r#"{"status":"valid"}"#,
+    ];
+    for row in refused_rows {
+        bodies.push(("validate", false, row.to_string()));
+        bodies.push(("batch", false, format!(r#"{{"email_batch":[{row}],"errors":[]}}"#)));
+    }
+    for body in [
+        r#"{"address":"a@b.c","status":"valid","free_email":"yes"}"#,
+        r#"{"address":"a@b.c","status":"valid","did_you_mean":7}"#,
+        r#"{"Message":5}"#,
+    ] {
+        bodies.push(("validate", false, body.to_string()));
+    }
+    for body in [
+        DOCS_VALIDATE_RESPONSE,
+        r#"{"address":"a@b.c","status":"valid","did_you_mean":null,"account":null}"#,
+        r#"{"Message":"Greylisted. Please validate again later."}"#,
+    ] {
+        bodies.push(("validate", true, body.to_string()));
+    }
+    bodies.push(("batch", true, format!(r#"{{"email_batch":[{DOCS_VALIDATE_RESPONSE}],"errors":[]}}"#)));
+    bodies
+}
+
+/// Field types are part of the shape (standard.md §3): `get_credits` needs
+/// `Credits` as a JSON string holding an integer, and validate (and each
+/// batch row) needs `address` and `status` strings, except the greylist
+/// `{"Message": ...}` answer. Anything else is an ApiError with status 200;
+/// the documented responses still parse. The calls come from the complete
+/// sweep, so a new credits or validate entry point is covered too.
+#[test]
+fn credits_and_validate_fields_have_their_documented_types() {
+    let (port, _fake) = start_fake();
+    let mut wrong = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (index, (group, accepted, body)) in field_type_bodies().iter().enumerate() {
+        for (name, result) in sweep_with_key(port, &format!("fields-{index}-key")) {
+            let in_group = match *group {
+                "credits" => name.contains("credits"),
+                "validate" => name.starts_with("validate_email"),
+                _ => name.starts_with("batch_validate"),
+            };
+            if !in_group {
+                continue;
+            }
+            seen.insert(name);
+            let ok = match &result {
+                Ok(_) => *accepted,
+                Err(error @ ZBError::ApiError { .. }) => !*accepted && error.status_code() == Some(200),
+                Err(_) => false,
+            };
+            if !ok {
+                wrong.push(format!("{name} {body}: {result:?}"));
+            }
+        }
+    }
+    assert!(seen.len() >= 6, "sweep found only {seen:?}");
+    assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
+}
+
+const DEAD_KEY_BODIES: [&str; 3] = [
+    r#"{"error":"Invalid API key or your account ran out of credits"}"#,
+    r#"{"error_message":"Invalid API key or your account ran out of credits"}"#,
+    r#"{"Error":"Invalid API key or your account ran out of credits"}"#,
+];
+
+/// A dead or invalid key answered with HTTP 200 (`error`, `error_message` or
+/// `Error`, no `success`) is an ApiError with status 200 on every call of the
+/// complete sweep, the multipart sendfile uploads included.
+#[test]
+fn a_dead_key_body_on_200_is_an_error_on_every_call() {
+    let (port, _fake) = start_fake();
+    let mut wrong = Vec::new();
+    let mut uploads = BTreeSet::new();
+    for (index, body) in DEAD_KEY_BODIES.iter().enumerate() {
+        for (name, result) in sweep_with_key(port, &format!("deadbody-{index}-key")) {
+            // The multipart uploads: the sendfile family and the finder,
+            // domain search and list evaluator files.
+            if name.contains("submit") || (name.starts_with("send_") && name != "send_evaluated_file") {
+                uploads.insert(name);
+            }
+            if !matches!(&result, Err(error @ ZBError::ApiError { .. }) if error.status_code() == Some(200)) {
+                wrong.push(format!("{body} {name}: {result:?}"));
+            }
+        }
+    }
+    assert!(uploads.len() >= 5, "only {uploads:?}");
     assert!(wrong.is_empty(), "{} wrong: {wrong:#?}", wrong.len());
 }
 

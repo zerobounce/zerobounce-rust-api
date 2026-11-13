@@ -414,6 +414,47 @@ mod redaction_tests {
         );
     }
 
+    /// Each decode step of the secret check is needed: every text below holds
+    /// the secret behind exactly one kind of escape that only that step
+    /// undoes, and none of them is a spelling `secret_forms` generates, so
+    /// only the decode check can drop it. Removing a step, its lowercase hex,
+    /// `\uXXXX` or surrogate pairs, or a layer of depth leaks the secret. Each
+    /// UTF-8 sequence length (2, 3 and 4 bytes) is covered behind both the
+    /// percent and the JSON step.
+    #[test]
+    fn each_decode_step_of_the_secret_check_is_needed() {
+        let cases = [
+            // '+' stays a plus: only percent-decoding without + as space works.
+            ("percent, + kept", "k+y/z", "echo k+y%2fz end"),
+            ("percent, upper-case hex", "k+y/z", "echo k+y%2Fz end"),
+            // A space sent as +: only percent-decoding with + as space works.
+            ("percent, + as space", "k y/z", "echo k+y%2fz end"),
+            ("percent, 2-byte UTF-8", "k+y\u{e9}z", "echo k+y%c3%a9z end"),
+            ("percent, 3-byte UTF-8", "k+y\u{20ac}z", "echo k+y%e2%82%acz end"),
+            ("percent, 4-byte UTF-8", "k+y\u{1F600}z", "echo k+y%f0%9f%98%80z end"),
+            ("JSON escape", "k\"y", r#"echo k\"y end"#),
+            (r"JSON \/", "k/y", r"echo k\/y end"),
+            (r"JSON \uXXXX", "k/y", r"echo k\u002fy end"),
+            (r"JSON \uXXXX, 2-byte UTF-8", "k\u{e9}y", r"echo k\u00e9y end"),
+            (r"JSON \uXXXX, 3-byte UTF-8", "k\u{20ac}y", r"echo k\u20acy end"),
+            ("JSON surrogate pair, 4-byte UTF-8", "k\u{1F600}y", r"echo k\ud83d\ude00y end"),
+            ("NUL before", "k+y/z", "a\0b echo k+y%2fz end"),
+            ("%00 before", "k+y/z", "a%00b echo k+y%2fz end"),
+            ("invalid UTF-8 run before", "k+y/z", "%ff%fe echo k+y%2fz end"),
+            // Four layers: four percent-encodings of '/', the last one with %25.
+            ("four layers", "k/y", "echo k%2525252fy end"),
+        ];
+        for (name, secret, text) in cases {
+            assert!(
+                super::secret_survives_decoding(text, &[secret]),
+                "{name}: {text:?} not caught for {secret:?}"
+            );
+        }
+        // Five layers is past the promise: the text is kept, so the depth is
+        // exactly four and the check is not dropping every escaped text.
+        assert!(!super::secret_survives_decoding("echo k%252525252fy end", &["k/y"]));
+    }
+
     /// Every form of a key, and any api_key value, whichever key it holds.
     #[test]
     fn every_form_of_a_secret_is_masked() {

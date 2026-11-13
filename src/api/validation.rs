@@ -8,6 +8,20 @@ use crate::utility::structures::validation::{ZBBatchValidation, ZBValidation};
 use crate::utility::{ZBError, CONTENT_TYPE_JSON, ENDPOINT_BATCH_VALIDATE, ENDPOINT_VALIDATE};
 use crate::{ZBResult, ZeroBounce};
 
+/// Whether a validate result (or a validatebatch row) has the `address` and
+/// `status` strings it cannot do without (standard.md §3, "field types are
+/// part of the shape"), or is the greylist answer, which carries only
+/// `"Message"`. Serde already refuses a field of another JSON type, and
+/// `null` for these two; the struct defaults them only for the greylist answer.
+fn has_address_and_status(row: &Value) -> bool {
+    let is_string = |key: &str| row.get(key).is_some_and(Value::is_string);
+    is_string("Message") || (is_string("address") && is_string("status"))
+}
+
+fn unexpected_shape() -> ZBError {
+    ZBError::api(200, crate::utility::http_error::UNEXPECTED_JSON_SHAPE_MESSAGE)
+}
+
 impl ZeroBounce {
     pub fn validate_email_and_ip(&self, email: &str, ip_address: &str) -> ZBResult<ZBValidation> {
         self.validate_email_with_options(email, ip_address, &ZBValidateOptions::default())
@@ -111,7 +125,12 @@ impl ZeroBounce {
             self.generic_get_request(self.url_provider.url_of(ENDPOINT_VALIDATE), query_args)?
         };
 
-        crate::utility::http_error::parse_json_body(&response_content)
+        let validation: ZBValidation = crate::utility::http_error::parse_json_body(&response_content)?;
+        let body: Value = crate::utility::http_error::parse_json_body(&response_content)?;
+        if !has_address_and_status(&body) {
+            return Err(unexpected_shape());
+        }
+        Ok(validation)
     }
 
     pub fn validate_email(&self, email: &str) -> ZBResult<ZBValidation> {
@@ -213,6 +232,11 @@ impl ZeroBounce {
         let response_content = self.read_api_response(response)?;
         let validation: ZBBatchValidation =
             crate::utility::http_error::parse_json_body(&response_content)?;
+        let body: Value = crate::utility::http_error::parse_json_body(&response_content)?;
+        let rows = body.get("email_batch").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+        if !rows.iter().all(has_address_and_status) {
+            return Err(unexpected_shape());
+        }
         for item in &validation.errors {
             if item.email_address.eq_ignore_ascii_case("all") {
                 let message = crate::utility::http_error::strip_error_prefix(&item.error);
@@ -250,5 +274,20 @@ mod test {
         );
 
         assert!(body_result.is_ok())
+    }
+
+    /// The crate's own validate and batch fixtures keep parsing under the
+    /// address/status check.
+    #[test]
+    fn the_validate_fixtures_have_address_and_status() {
+        use crate::utility::mock_constants::*;
+        for fixture in [VALIDATION_RESPONSE_VALID, VALIDATION_RESPONSE_INVALID, VALIDATION_RESPONSE_NULL_FIELDS] {
+            let body: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            assert!(super::has_address_and_status(&body), "{fixture}");
+        }
+        for fixture in [BATCH_VALIDATION_WITH_ERROR, BATCH_VALIDATION_ERROR_ONLY, BATCH_VALIDATION_NO_ERROR] {
+            let body: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            assert!(body["email_batch"].as_array().unwrap().iter().all(super::has_address_and_status), "{fixture}");
+        }
     }
 }
