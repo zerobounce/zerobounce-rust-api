@@ -13,6 +13,7 @@ use crate::utility::{ZBError, ZBResult};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBFileFeedback {
+    #[serde(deserialize_with = "null_as_default")]
     pub success: bool,
     /// A list of messages from the API is joined with newlines.
     #[serde(deserialize_with = "deserialize_message_text")]
@@ -23,10 +24,13 @@ pub struct ZBFileFeedback {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBFileStatus {
+    #[serde(deserialize_with = "null_as_default")]
     pub success: bool,
     #[serde(deserialize_with = "null_as_default")]
     pub file_id: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub file_name: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub file_status: String,
     pub error_reason: Option<String>,
     #[serde(default)]

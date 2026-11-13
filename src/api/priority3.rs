@@ -7,6 +7,7 @@ use serde_json::Value;
 use serde::Deserialize;
 
 use crate::utility::structures::bulk::{ZBBulkResponse, ZBEmailFinderFileOptions, ZBFileFeedback};
+use crate::utility::structures::custom_deserialize::null_as_default;
 use crate::utility::{ZBError, ZBResult};
 use crate::ZeroBounce;
 
@@ -75,8 +76,11 @@ fn bulk_root_file_job(
 
 #[derive(Deserialize, Debug)]
 pub struct S3ListFileEntry {
+    #[serde(deserialize_with = "null_as_default")]
     pub name: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub size: i64,
+    #[serde(deserialize_with = "null_as_default")]
     pub last_modified: String,
 }
 

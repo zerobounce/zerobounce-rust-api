@@ -239,12 +239,13 @@ pub fn ensure_json_api_body(status: u16, content_type: &str, body: &str) -> ZBRe
 }
 
 /// Whether a JSON body is nothing but a message: an object with no "success"
-/// field whose keys are all message keys, at least one a non-empty string.
+/// field whose keys are all message keys. The keys decide, whatever the
+/// message's value (a string, blank, null or a list), since no result object
+/// has these keys.
 fn message_only_body(object: &serde_json::Map<String, serde_json::Value>) -> bool {
     !object.is_empty()
         && !object.contains_key("success")
         && object.keys().all(|key| MESSAGE_KEYS.contains(&key.as_str()))
-        && !api_error_field(object, &MESSAGE_KEYS).is_empty()
 }
 
 /// For a call whose result is never a bare message -- the email finder and

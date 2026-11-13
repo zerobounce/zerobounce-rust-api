@@ -53,13 +53,17 @@ where
 }
 
 
+/// `null` reads as the type's default (the Unix epoch).
 pub(crate) fn deserialize_only_date<'de, D>(
     deserializer: D,
 ) -> Result<NaiveDate, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let string: String = serde::Deserialize::deserialize(deserializer)?;
+    let string: Option<String> = serde::Deserialize::deserialize(deserializer)?;
+    let Some(string) = string else {
+        return Ok(NaiveDate::default());
+    };
     let format = "%m/%d/%Y";
     NaiveDate::parse_from_str(&string, format)
         .map_err(SerdeError::custom)
@@ -99,12 +103,14 @@ where
     DateTime::parse_from_rfc3339(&string).map_err(SerdeError::custom)
 }
 
-// Expecting a
+/// `null` reads as "", which has no percentage, so it is -1 like any other value
+/// without one.
 pub(crate) fn deserialize_percentage_float<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
     D: serde::Deserializer<'de>
 {
-    let string: String = serde::Deserialize::deserialize(deserializer)?;
+    let string: Option<String> = serde::Deserialize::deserialize(deserializer)?;
+    let string = string.unwrap_or_default();
 
     let raw_error = SerdeError::custom("invalid percentage amount");
     let first_part = string.split('%').next().ok_or(raw_error)?;

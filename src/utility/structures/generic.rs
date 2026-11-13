@@ -16,79 +16,79 @@ use crate::utility::structures::custom_deserialize::deserialize_stringified_uint
 /// change. Values come from the API (or from `serde_json` in tests).
 #[non_exhaustive]
 pub struct ApiUsage {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub total: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub status_valid: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub status_invalid: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub status_catch_all: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub status_do_not_mail: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub status_spamtrap: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub status_unknown: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_toxic: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_disposable: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_role_based: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_possible_trap: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_global_suppression: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_timeout_exceeded: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_mail_server_temporary_error: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_mail_server_did_not_respond: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_greylisted: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_antispam_system: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_does_not_accept_mail: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_exception_occurred: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_failed_syntax_check: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_mailbox_not_found: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_unroutable_ip_address: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_possible_typo: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_no_dns_entries: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_role_based_catch_all: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_accept_all: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_mailbox_quota_exceeded: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_forcible_disconnect: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_failed_smtp_connection: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_mx_forward: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_alternate: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_allowed: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_blocked: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_gold: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_role_based_accept_all: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_leading_period_removed: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status_alias_address: u64,
 
     #[serde(deserialize_with="deserialize_only_date")]
@@ -100,6 +100,7 @@ pub struct ApiUsage {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ActivityData {
+    #[serde(deserialize_with = "null_as_default")]
     pub found: bool,
 
     #[serde(deserialize_with="deserialize_stringified_uint")]
@@ -108,25 +109,37 @@ pub struct ActivityData {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ScoreEmailResponse {
+    #[serde(deserialize_with = "null_as_default")]
     pub email: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub score: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DomainFormats {
+    #[serde(deserialize_with = "null_as_default")]
     pub format: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub confidence: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct FindEmailResponse {
+    #[serde(deserialize_with = "null_as_default")]
     pub email: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub domain: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub format: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub status: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub sub_status: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub confidence: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub did_you_mean: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub failure_reason: String,
     #[serde(deserialize_with = "null_as_default")]
     pub other_domain_formats: Vec<DomainFormats>,
@@ -137,16 +150,17 @@ pub struct FindEmailResponse {
 /// `email_confidence` and `company_name` fields.
 #[derive(Clone, Debug, Deserialize)]
 pub struct FindEmailResponseV2 {
+    #[serde(deserialize_with = "null_as_default")]
     pub email: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub domain: String,
-    #[serde(rename = "email_confidence", default)]
+    #[serde(rename = "email_confidence", default, deserialize_with = "null_as_default")]
     pub confidence: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub company_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub did_you_mean: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub failure_reason: String,
 }
 
@@ -155,17 +169,17 @@ pub struct FindEmailResponseV2 {
 /// `format`, `confidence`, and `other_domain_formats` fields.
 #[derive(Clone, Debug, Deserialize)]
 pub struct DomainSearchResponseV2 {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub domain: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub company_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub format: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub confidence: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub did_you_mean: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub failure_reason: String,
     #[serde(default, deserialize_with = "null_as_default")]
     pub other_domain_formats: Vec<DomainFormats>,

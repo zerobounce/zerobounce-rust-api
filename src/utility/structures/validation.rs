@@ -19,9 +19,9 @@ pub struct ZBValidation {
     pub address: String,
     #[serde(default)]
     pub status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub sub_status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub free_email: bool,
     pub did_you_mean: Option<String>,
     pub account: Option<String>,
@@ -74,7 +74,9 @@ impl ZBValidation {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZBBatchError {
+    #[serde(deserialize_with = "null_as_default")]
     pub error: String,
+    #[serde(deserialize_with = "null_as_default")]
     pub email_address: String,
 }
 
