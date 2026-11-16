@@ -7,6 +7,10 @@ WORKDIR /app
 
 COPY . .
 
+# Cargo.lock is not tracked, so resolve to crate versions that support the image's Rust
+# (1.88), as the MSRV CI job does.
+ENV CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback
+
 # Download the crates at build time, so the tests run without network access. Some crates
 # unpack files readable only by their owner (root), so open the cache to the test user.
 RUN cargo fetch && chmod -R a+rX /usr/local/cargo/registry
