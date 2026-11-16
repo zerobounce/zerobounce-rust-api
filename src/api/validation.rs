@@ -18,8 +18,8 @@ fn has_address_and_status(row: &Value) -> bool {
     is_string("Message") || (is_string("address") && is_string("status"))
 }
 
-fn unexpected_shape() -> ZBError {
-    ZBError::api(200, crate::utility::http_error::UNEXPECTED_JSON_SHAPE_MESSAGE)
+fn unexpected_shape(status: u16) -> ZBError {
+    ZBError::api(status, crate::utility::http_error::UNEXPECTED_JSON_SHAPE_MESSAGE)
 }
 
 impl ZeroBounce {
@@ -87,7 +87,7 @@ impl ZeroBounce {
             query_args.insert("callback_url", callback_url);
         }
 
-        let response_content = if options.use_post {
+        let (status, response_content) = if options.use_post {
             let mut form_args = HashMap::from([("email", email)]);
             let timeout_param;
             let activity_param;
@@ -120,15 +120,17 @@ impl ZeroBounce {
             if let Some(callback_url) = options.callback_url.as_deref() {
                 form_args.insert("callback_url", callback_url);
             }
-            self.generic_form_post_request(self.url_provider.url_of(ENDPOINT_VALIDATE), form_args)?
+            self.form_post_request_with_status(self.url_provider.url_of(ENDPOINT_VALIDATE), form_args)?
         } else {
-            self.generic_get_request(self.url_provider.url_of(ENDPOINT_VALIDATE), query_args)?
+            self.get_request_with_status(self.url_provider.url_of(ENDPOINT_VALIDATE), query_args, false)?
         };
 
-        let validation: ZBValidation = crate::utility::http_error::parse_json_body(&response_content)?;
-        let body: Value = crate::utility::http_error::parse_json_body(&response_content)?;
+        let validation: ZBValidation =
+            crate::utility::http_error::parse_json_body_with_status(status, &response_content)?;
+        let body: Value =
+            crate::utility::http_error::parse_json_body_with_status(status, &response_content)?;
         if !has_address_and_status(&body) {
-            return Err(unexpected_shape());
+            return Err(unexpected_shape(status));
         }
         Ok(validation)
     }
@@ -228,14 +230,14 @@ impl ZeroBounce {
             .header("content-type", CONTENT_TYPE_JSON)
             .send()?;
 
-        let status = response.status().as_u16();
-        let response_content = self.read_api_response(response)?;
+        let (status, response_content) = self.read_api_response_with_status(response, false)?;
         let validation: ZBBatchValidation =
-            crate::utility::http_error::parse_json_body(&response_content)?;
-        let body: Value = crate::utility::http_error::parse_json_body(&response_content)?;
+            crate::utility::http_error::parse_json_body_with_status(status, &response_content)?;
+        let body: Value =
+            crate::utility::http_error::parse_json_body_with_status(status, &response_content)?;
         let rows = body.get("email_batch").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
         if !rows.iter().all(has_address_and_status) {
-            return Err(unexpected_shape());
+            return Err(unexpected_shape(status));
         }
         for item in &validation.errors {
             if item.email_address.eq_ignore_ascii_case("all") {

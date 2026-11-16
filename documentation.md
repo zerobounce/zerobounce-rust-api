@@ -8,7 +8,7 @@ zero-bounce = "4"
 ```
 
 Requires Rust 1.88 or newer (`rust-version = "1.88"`). Upgrading from 2.x? See the
-breaking changes in the [4.0.0 changelog](https://github.com/zerobounce/zerobounce-rust-api/blob/main/CHANGELOG.md#400---2026-11-12).
+breaking changes in the [4.0.0 changelog](https://github.com/zerobounce/zerobounce-rust-api/blob/main/CHANGELOG.md#400---2026-11-11).
 
 #### How to use
 This crate uses the ZeroBounce API which requires an API key. Check [this guide](https://www.zerobounce.net/docs/api-dashboard#API_keys_management) to see how to grab yours.
@@ -758,3 +758,26 @@ println!("Delete successful: {}", delete_result.success);
 ```
 
 **Returns:** `ZBFileFeedback` - Same structure as `bulk_validation_result_delete`
+
+## Warmup
+
+`ZeroBounceWarmup` is a separate client. Construct it with the Warmup key. `add_sending_account` is the `self_managed` call. For `zb_managed`, use `add_zb_managed_sending_account` with `ZbManagedEmailContent` and `ZbManagedSending`. Both structs are `#[non_exhaustive]`: start from `Default::default()` and set the fields you need. Each field is sent only when set. `timezone_offset` is an `f64` from -11.0 to 14.0. `EmailContent` and `ManagedSending` are deprecated; they cannot carry `company_description`, `example_email`, `weekdays_only`, `timezone` or a fractional offset.
+
+The date field uses `chrono::NaiveDate`. This crate does not re-export chrono, so a program that copies the example also needs `chrono = "0.4"`.
+
+```rust
+use zero_bounce::{ZbManagedEmailContent, ZbManagedSending, ZeroBounceWarmup};
+
+let warmup = ZeroBounceWarmup::new("<YOUR_WARMUP_API_KEY>")?;
+
+let mut content = ZbManagedEmailContent::default();
+content.company_name = Some("Acme".into());
+content.company_website = Some("https://acme.example".into());
+content.types_of_emails = vec!["newsletter".into()];
+
+let mut sending = ZbManagedSending::default();
+sending.timezone_offset = Some(5.5);
+sending.warmup_start_date = chrono::NaiveDate::from_ymd_opt(2026, 12, 1);
+
+warmup.add_zb_managed_sending_account("sender@example.com", None, Some(&content), Some(&sending))?;
+```

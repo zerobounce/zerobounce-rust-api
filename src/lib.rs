@@ -235,16 +235,6 @@ impl ZeroBounce {
         self.get_request_checked(url, query_args, false)
     }
 
-    /// `generic_get_request` for a call whose result is never a bare message
-    /// (the email finder and domain search), so a message-only body is an error.
-    fn finder_get_request<'a>(
-        &'a self,
-        url: String,
-        query_args: HashMap<&'a str, &'a str>,
-    ) -> ZBResult<String> {
-        self.get_request_checked(url, query_args, true)
-    }
-
     fn get_request_checked<'a>(
         &'a self,
         url: String,
@@ -261,22 +251,23 @@ impl ZeroBounce {
             .send()?;
         self.read_api_response_checked(response, message_only_is_failure)
     }
+}
 
-    fn generic_form_post_request<'a>(
-        &'a self,
-        url: String,
-        mut form_args: HashMap<&'a str, &'a str>,
-    ) -> ZBResult<String> {
-        self.require_key()?;
-        form_args.insert("api_key", self.api_key.as_str());
-
-        let response = self
-            .client
-            .post(parse_request_url(&url)?)
-            .form(&form_args)
-            .send()?;
-        self.read_api_response(response)
-    }
+/// Whether the authority of `url`, as written, holds an `@`. The parsed URL
+/// drops an empty userinfo (`https://@host`, `https://:@host`), so the text
+/// is checked too.
+fn has_userinfo_marker(url: &str) -> bool {
+    let cleaned: String = url.chars().filter(|c| !matches!(c, '\t' | '\n' | '\r')).collect();
+    let after_scheme = cleaned
+        .trim_matches(|c: char| c <= ' ')
+        .split_once(':')
+        .map_or("", |(_, rest)| rest);
+    let authority = after_scheme
+        .trim_start_matches(['/', '\\'])
+        .split(['/', '\\', '?', '#'])
+        .next()
+        .unwrap_or("");
+    authority.contains('@')
 }
 
 /// Parse a request URL and enforce the transport rule every request follows:
@@ -284,8 +275,19 @@ impl ZeroBounce {
 /// `localhost` and `[::1]`. Every request path calls this on its final URL,
 /// so an `http://` override on [`ZBUrlProvider`] can never put the API key on
 /// the wire in cleartext.
+///
+/// A URL with a username or a password is refused first, whatever its scheme
+/// (`https://api.zerobounce.net@evil.example/v2` is a request to
+/// `evil.example`). Every message here is fixed text: none quotes the URL,
+/// which may hold credentials.
 pub(crate) fn parse_request_url(url: &str) -> ZBResult<reqwest::Url> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| ZBError::ExplicitError(e.to_string()))?;
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| ZBError::ExplicitError("request URL is not a valid URL".into()))?;
+    if !parsed.username().is_empty() || parsed.password().is_some() || has_userinfo_marker(url) {
+        return Err(ZBError::ExplicitError(
+            "request URL must not contain a username or password".into(),
+        ));
+    }
     if parsed.scheme() == "https" {
         return Ok(parsed);
     }
@@ -351,6 +353,36 @@ mod security_tests {
         for url in ["http://127.0.0.2/v2/", "http://0.0.0.0/v2/", "ftp://127.0.0.1/", "not a url"] {
             assert!(rejected(url).contains("https://"), "{url}");
         }
+    }
+
+    #[test]
+    fn request_urls_with_credentials_are_refused_before_the_scheme_check() {
+        for url in [
+            "https://api.zerobounce.net@evil.example/v2",
+            "http://user:pw@127.0.0.1/v2",
+            "https://user:pw@api.zerobounce.net/v2",
+            "http://user@127.0.0.1/v2",
+            "https://:pw@example.com/",
+            "https://@example.com/",
+            "https://:@example.com/",
+        ] {
+            let error = parse_request_url(url).unwrap_err().to_string();
+            assert_eq!(error, "request URL must not contain a username or password", "{url}");
+            assert!(!error.contains("evil") && !error.contains("pw"), "{url}: {error}");
+            assert!(ZeroBounce::with_base_url("key", url).is_err(), "{url}");
+        }
+        // Still the existing scheme rule.
+        assert!(parse_request_url("http://127.0.0.1").is_ok());
+        assert!(parse_request_url("https://example.com").is_ok());
+        let error = parse_request_url("http://example.com").unwrap_err().to_string();
+        assert!(error.contains("https://"), "{error}");
+    }
+
+    #[test]
+    fn a_url_that_does_not_parse_gets_a_fixed_message_without_the_url() {
+        let error = parse_request_url("https://secret-host-xyz:notaport/v2").unwrap_err().to_string();
+        assert_eq!(error, "request URL is not a valid URL");
+        assert!(!error.contains("secret-host-xyz"), "{error}");
     }
 
     #[test]

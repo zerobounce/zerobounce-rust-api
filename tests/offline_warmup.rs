@@ -34,6 +34,8 @@ struct Fake {
     reply: Mutex<Option<(u16, String, String)>>,
     /// A Location header for the next reply only.
     location: Mutex<Option<String>>,
+    /// Extra header lines (`Name: value\r\n`) for the next reply only.
+    extra_headers: Mutex<Option<String>>,
     /// Added to the Content-Length the fake announces. The body itself is
     /// sent whole, so a non-zero value is a response cut short.
     extra_length: AtomicUsize,
@@ -53,6 +55,10 @@ impl Fake {
     fn reply_with(&self, status: u16, content_type: &str, body: &str) {
         *self.reply.lock().unwrap() =
             Some((status, content_type.to_string(), body.to_string()));
+    }
+
+    fn add_header_once(&self, line: &str) {
+        *self.extra_headers.lock().unwrap() = Some(format!("{line}\r\n"));
     }
 
     fn redirect_to(&self, status: u16, location: &str) {
@@ -169,6 +175,10 @@ fn handle(mut stream: TcpStream, fake: Arc<Fake>) {
                     .take()
                     .map(|target| format!("Location: {target}\r\n"))
                     .unwrap_or_default();
+                let location = format!(
+                    "{location}{}",
+                    fake.extra_headers.lock().unwrap().take().unwrap_or_default()
+                );
                 let response = format!(
                     "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\n{location}Content-Length: {}\r\nConnection: close\r\n\r\n",
                     payload.len() + fake.extra_length.load(Ordering::SeqCst)
@@ -300,6 +310,7 @@ fn start_fake() -> (u16, Arc<Fake>) {
         records: Mutex::new(Vec::new()),
         reply: Mutex::new(None),
         location: Mutex::new(None),
+        extra_headers: Mutex::new(None),
         extra_length: AtomicUsize::new(0),
     });
     let shared = fake.clone();
@@ -907,6 +918,100 @@ fn an_html_page_json_body_or_empty_body_in_place_of_a_csv_is_an_error() {
             }
         }
         fake.take();
+    }
+}
+
+/// Both Warmup CSV downloads, answered with one fixed reply each.
+fn warmup_csv_results(
+    fake: &Fake,
+    zb: &ZeroBounceWarmup,
+    reply: (u16, &str, &str),
+    header: Option<&str>,
+) -> Vec<(&'static str, Result<String, ZBError>)> {
+    let mut results = Vec::new();
+    for name in ["download_seeds", "download_statistics"] {
+        fake.reply_with(reply.0, reply.1, reply.2);
+        if let Some(header) = header {
+            fake.add_header_once(header);
+        }
+        let result = if name == "download_seeds" {
+            zb.download_seeds()
+        } else {
+            zb.download_statistics("a@b.com")
+        };
+        fake.take();
+        results.push((name, result));
+    }
+    results
+}
+
+/// A leading BOM (one or several) does not hide JSON, a body of nothing but
+/// BOMs is empty, a `+json` content type is JSON, and so is a body that
+/// starts with `{` but does not parse. A plain CSV, with or without a BOM,
+/// is still the CSV.
+#[test]
+fn a_csv_download_sees_through_boms_and_json_lookalikes() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    let errors = [
+        ("one BOM", "text/csv", "\u{FEFF}{\"message\":\"No seeds.\"}"),
+        ("two BOMs", "text/csv", "\u{FEFF}\u{FEFF}{\"message\":\"No seeds.\"}"),
+        ("two BOMs and a list", "text/csv", "\u{FEFF}\u{FEFF}[\"No seeds.\"]"),
+        ("BOM only", "text/csv", "\u{FEFF}"),
+        ("BOMs only", "text/csv", "\u{FEFF}\u{FEFF}\u{FEFF}"),
+        ("+json type", "application/problem+json", "seed,provider\na@b.com,gmail\n"),
+        ("+json type with parameters", "application/vnd.api+JSON; charset=utf-8", "seed\n"),
+        ("not json", "text/csv", "{not json"),
+        ("BOMs and not json", "text/csv", "\u{FEFF}\u{FEFF}{not json"),
+        ("object that is not an error", "text/csv", r#"{"file_id":"x"}"#),
+    ];
+    for (name, content_type, body) in errors {
+        for (method, result) in warmup_csv_results(&fake, &zb, (200, content_type, body), None) {
+            match result {
+                Ok(csv) => panic!("{name}: {method} returned {csv:?} as the CSV"),
+                Err(error) => {
+                    assert_eq!(error.status_code(), Some(200), "{name}: {method}: {error:?}")
+                }
+            }
+        }
+    }
+    for body in ["seed,provider\na@b.com,gmail\n", "\u{FEFF}seed,provider\na@b.com,gmail\n"] {
+        for (method, result) in warmup_csv_results(&fake, &zb, (200, "text/csv", body), None) {
+            assert_eq!(result.unwrap_or_else(|e| panic!("{method}: {e:?}")), body);
+        }
+    }
+}
+
+/// reqwest's decompression is off, so a compressed CSV would come back as its
+/// raw bytes. The error carries the response status.
+#[test]
+fn a_csv_download_with_a_content_encoding_is_an_error() {
+    let (port, fake) = start_fake();
+    let zb = client(port);
+    for encoding in ["gzip", "br", "deflate", "Zstd", "identity, gzip"] {
+        let header = format!("Content-Encoding: {encoding}");
+        for (method, result) in warmup_csv_results(
+            &fake,
+            &zb,
+            (200, "text/csv", "seed,provider\na@b.com,gmail\n"),
+            Some(&header),
+        ) {
+            match result {
+                Ok(csv) => panic!("{encoding}: {method} returned {csv:?}"),
+                Err(error) => assert_eq!(error.status_code(), Some(200), "{encoding}: {method}: {error:?}"),
+            }
+        }
+    }
+    for encoding in ["identity", "Identity"] {
+        let header = format!("Content-Encoding: {encoding}");
+        for (method, result) in warmup_csv_results(
+            &fake,
+            &zb,
+            (200, "text/csv", "seed,provider\na@b.com,gmail\n"),
+            Some(&header),
+        ) {
+            assert!(result.is_ok(), "{encoding}: {method}: {result:?}");
+        }
     }
 }
 

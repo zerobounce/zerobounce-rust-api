@@ -12,10 +12,56 @@ pub mod structures;
 
 pub use bulk_get_file::{format_get_file_error_message, get_file_json_indicates_error};
 
-/// A key with surrounding whitespace or control characters would be quoted,
-/// unredacted, in the HTTP library's own error, so it is never sent.
+/// Invisible characters that are neither whitespace nor control: the default
+/// ignorables, variation selectors, Hangul, braille and Mongolian blanks, and
+/// the Unicode format (Cf) characters that std cannot classify. A key that
+/// holds one looks like a different key on screen.
+fn is_invisible_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{08E2}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{17B4}'
+            | '\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2065}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{2800}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFF8}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{13430}'..='\u{1343F}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}'
+    )
+}
+
+/// A key with surrounding whitespace, a control character, a Unicode space
+/// other than the ASCII space, or an invisible character anywhere in it would
+/// be quoted, unredacted, in the HTTP library's own error, or would look like
+/// another key, so it is never sent. An ASCII space in the middle is allowed.
 pub(crate) fn check_key_text(api_key: &str) -> ZBResult<()> {
-    if api_key != api_key.trim() || api_key.chars().any(|c| c.is_control()) {
+    if api_key != api_key.trim()
+        || api_key
+            .chars()
+            .any(|c| c.is_control() || (c != ' ' && c.is_whitespace()) || is_invisible_char(c))
+    {
         return Err(ZBError::explicit(
             "api_key has surrounding whitespace or control characters",
         ));
@@ -93,6 +139,78 @@ fn secret_forms(secret: &str) -> Vec<String> {
     forms
 }
 
+/// The case folding of one character: its upper case, lower-cased (so `ß`
+/// is found as `SS` and `ss`, and `ﬁ` as `FI`).
+fn fold_char(c: char, out: &mut String) {
+    for upper in c.to_uppercase() {
+        out.extend(upper.to_lowercase());
+    }
+}
+
+/// `text` under [`fold_char`].
+fn fold(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        fold_char(c, &mut out);
+    }
+    out
+}
+
+/// Replace every occurrence of each form in `text` with `***`, ignoring case.
+/// Text and forms are folded and each match is mapped back to the original
+/// text, which is masked whole: a match that covers part of one original
+/// character masks that character. Overlapping matches become one `***`.
+fn mask_forms(text: &str, forms: &[String]) -> String {
+    let mut text = text.to_string();
+    for form in forms.iter().filter(|form| !form.is_empty()) {
+        text = text.replace(form.as_str(), "***");
+    }
+    // For every original char: where it starts and ends in `text`, and where
+    // its folding starts in `folded`.
+    let mut folded = String::with_capacity(text.len());
+    let mut bounds = Vec::new();
+    for (start, c) in text.char_indices() {
+        bounds.push((start, start + c.len_utf8(), folded.len()));
+        fold_char(c, &mut folded);
+    }
+    let char_at = |offset: usize| bounds.partition_point(|bound| bound.2 <= offset) - 1;
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for form in forms {
+        let needle = fold(form);
+        if needle.is_empty() || !seen.insert(needle.clone()) {
+            continue;
+        }
+        let mut from = 0;
+        while let Some(at) = folded[from..].find(&needle) {
+            let first = from + at;
+            let last = first + needle.len() - 1;
+            spans.push((bounds[char_at(first)].0, bounds[char_at(last)].1));
+            from = first + folded[first..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    if spans.is_empty() {
+        return text;
+    }
+    spans.sort_unstable();
+    let mut out = String::with_capacity(text.len());
+    let mut pos = 0;
+    let mut i = 0;
+    while i < spans.len() {
+        let (start, mut end) = spans[i];
+        i += 1;
+        while i < spans.len() && spans[i].0 <= end {
+            end = end.max(spans[i].1);
+            i += 1;
+        }
+        out.push_str(&text[pos..start]);
+        out.push_str("***");
+        pos = end;
+    }
+    out.push_str(&text[pos..]);
+    out
+}
+
 /// Mask every `api_key=` value in a message, whichever key it holds.
 fn scrub_query_string_values(text: &str) -> String {
     // ASCII lowercasing keeps every byte offset, so indexes found in `lower`
@@ -127,11 +245,7 @@ fn scrub_query_string_values(text: &str) -> String {
 pub(crate) fn redact_secrets(text: &str, secrets: &[&str]) -> String {
     let mut value = text.to_string();
     for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
-        for form in secret_forms(secret) {
-            if !form.is_empty() {
-                value = value.replace(&form, "***");
-            }
-        }
+        value = mask_forms(&value, &secret_forms(secret));
     }
     let value = scrub_query_string_values(&value);
     if secret_survives_decoding(&value, secrets) {
@@ -150,18 +264,21 @@ const MAX_SECRET_DECODE_LAYERS: usize = 4;
 
 /// Whether any view of `text`, decoded up to [`MAX_SECRET_DECODE_LAYERS`] layers deep in any order
 /// (percent-decoding, percent-decoding with `+` as a space, JSON-unescaping
-/// with `\/` and `\uXXXX`), contains a secret. `secret_forms` masks the
-/// spellings this crate can generate; this catches every other one (lowercase
-/// percent escapes, another JSON escaper).
+/// with `\/` and `\uXXXX`, [`quote_decoded`]), contains a secret, ignoring
+/// case. `secret_forms` masks the spellings this crate can generate; this
+/// catches every other one (lowercase percent escapes, another JSON escaper,
+/// an upper-cased echo).
 fn secret_survives_decoding(text: &str, secrets: &[&str]) -> bool {
     let secrets: Vec<&str> = secrets.iter().copied().filter(|secret| !secret.is_empty()).collect();
     if secrets.is_empty() {
         return false;
     }
-    let decoders: [fn(&str) -> String; 3] = [
+    let folded_secrets: Vec<String> = secrets.iter().map(|secret| fold(secret)).collect();
+    let decoders: [fn(&str) -> String; 4] = [
         |text| percent_decoded(text, false),
         |text| percent_decoded(text, true),
         json_unescaped,
+        quote_decoded,
     ];
     let mut seen = std::collections::HashSet::new();
     seen.insert(text.to_string());
@@ -169,7 +286,10 @@ fn secret_survives_decoding(text: &str, secrets: &[&str]) -> bool {
     for layer in 0..=MAX_SECRET_DECODE_LAYERS {
         let mut next = Vec::new();
         for view in &views {
-            if secrets.iter().any(|secret| view.contains(secret)) {
+            let folded_view = fold(view);
+            if secrets.iter().any(|secret| view.contains(secret))
+                || folded_secrets.iter().any(|secret| folded_view.contains(secret.as_str()))
+            {
                 return true;
             }
             if layer == MAX_SECRET_DECODE_LAYERS {
@@ -248,7 +368,7 @@ fn json_unescaped(text: &str) -> String {
             i += 2;
             continue;
         }
-        if chars[i + 1] == 'u' {
+        if chars[i + 1] == 'u' || chars[i + 1] == 'U' {
             if let Some(code) = hex4(&chars, i + 2) {
                 // A surrogate pair (\ud83d\ude00) is one character.
                 if (0xD800..0xDC00).contains(&code)
@@ -268,6 +388,152 @@ fn json_unescaped(text: &str) -> String {
             }
         }
         out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// One layer of the quote spellings JSON does not cover: a backslash before
+/// a single quote, a `\xHH` or `\XHH` byte, an HTML character reference
+/// (`&#39;`, `&quot;`, `&APOS;`) and a quote doubled the way SQL writes it.
+/// A secret that holds a quote comes back in these forms, and none of them is
+/// a spelling [`secret_forms`] generates.
+fn quote_decoded(text: &str) -> String {
+    let text = text.replace("\\'", "'");
+    let text = hex_byte_escapes_decoded(&text);
+    let text = html_unescaped(&text);
+    text.replace("''", "'").replace("\"\"", "\"")
+}
+
+/// `text` with each `\xHH` and `\XHH` turned into that byte. A sequence that
+/// is not two hex digits is kept as it is; bytes that do not form UTF-8 are
+/// replaced, as they cannot be part of a secret.
+fn hex_byte_escapes_decoded(text: &str) -> String {
+    if !text.contains("\\x") && !text.contains("\\X") {
+        return text.to_string();
+    }
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 3 < bytes.len() && matches!(bytes[i + 1], b'x' | b'X') {
+            if let (Some(high), Some(low)) = (
+                (bytes[i + 2] as char).to_digit(16),
+                (bytes[i + 3] as char).to_digit(16),
+            ) {
+                out.push((high * 16 + low) as u8);
+                i += 4;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The character a named HTML reference stands for, the name matched in lower
+/// case so `&APOS;` and `&Quot;` are quotes too. Every ASCII punctuation name
+/// of HTML5 is here, plus `nbsp`.
+fn html_entity(name: &str) -> Option<char> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "amp" => '&',
+        "lt" => '<',
+        "gt" => '>',
+        "quot" => '"',
+        "apos" => '\'',
+        "nbsp" => '\u{a0}',
+        "tab" => '\t',
+        "newline" => '\n',
+        "excl" => '!',
+        "num" => '#',
+        "dollar" => '$',
+        "percnt" => '%',
+        "lpar" => '(',
+        "rpar" => ')',
+        "ast" | "midast" => '*',
+        "plus" => '+',
+        "comma" => ',',
+        "period" => '.',
+        "sol" => '/',
+        "colon" => ':',
+        "semi" => ';',
+        "equals" => '=',
+        "quest" => '?',
+        "commat" => '@',
+        "lsqb" | "lbrack" => '[',
+        "bsol" => '\\',
+        "rsqb" | "rbrack" => ']',
+        "hat" => '^',
+        "lowbar" | "underbar" => '_',
+        "grave" | "diacriticalgrave" => '`',
+        "lcub" | "lbrace" => '{',
+        "verbar" | "vert" | "verticalline" => '|',
+        "rcub" | "rbrace" => '}',
+        _ => return None,
+    })
+}
+
+/// `text` with each HTML character reference decoded: numeric (`&#39;`,
+/// `&#x27;`, with or without the `;`) and named (see [`html_entity`]; `amp`,
+/// `lt`, `gt` and `quot` also without the `;`, as browsers read them).
+/// Anything else is kept as it is.
+fn html_unescaped(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '&' {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let rest = &chars[i + 1..];
+        if rest.first() == Some(&'#') {
+            let (radix, digits_from) = match rest.get(1) {
+                Some('x') | Some('X') => (16, 2),
+                _ => (10, 1),
+            };
+            let digits: Vec<u32> = rest[digits_from.min(rest.len())..]
+                .iter()
+                .map_while(|c| c.to_digit(radix))
+                .collect();
+            if !digits.is_empty() {
+                let code = digits
+                    .iter()
+                    .fold(0u32, |code, digit| code.saturating_mul(radix).saturating_add(*digit));
+                let mut used = digits_from + digits.len();
+                if rest.get(used) == Some(&';') {
+                    used += 1;
+                }
+                out.push(char::from_u32(code).filter(|c| *c != '\0').unwrap_or('\u{FFFD}'));
+                i += 1 + used;
+                continue;
+            }
+        } else {
+            let name: String = rest.iter().take_while(|c| c.is_ascii_alphanumeric()).collect();
+            if !name.is_empty() {
+                if rest.get(name.len()) == Some(&';') {
+                    if let Some(decoded) = html_entity(&name) {
+                        out.push(decoded);
+                        i += name.len() + 2;
+                        continue;
+                    }
+                } else {
+                    let lower = name.to_ascii_lowercase();
+                    let legacy = ["amp", "quot", "lt", "gt"].into_iter().find(|legacy| lower.starts_with(legacy));
+                    if let Some(legacy) = legacy {
+                        out.push(html_entity(legacy).unwrap_or('&'));
+                        i += 1 + legacy.len();
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push('&');
         i += 1;
     }
     out
@@ -547,6 +813,129 @@ mod redaction_tests {
         assert_eq!(distinct.len(), spellings.len(), "{spellings:?}");
         for (name, text) in &spellings {
             assert_eq!(redact_secrets(&format!("<{text}>"), &[secret]), "<***>", "the {name} spelling was left");
+        }
+    }
+}
+
+#[cfg(test)]
+mod case_and_quote_tests {
+    use super::{check_key_text, redact_secrets, CREDENTIAL_OMITTED_MESSAGE};
+
+    #[test]
+    fn a_key_with_a_unicode_space_a_control_or_an_invisible_character_is_refused() {
+        let mut refused: Vec<char> = vec!['\u{a0}', '\u{2028}', '\u{3000}', '\u{85}', '\t', '\n', '\0', '\u{7f}'];
+        refused.extend([
+            '\u{200B}', '\u{FEFF}', '\u{180E}', '\u{034F}', '\u{3164}', '\u{2800}', '\u{2065}', '\u{FFF0}',
+            '\u{FFF8}', '\u{E0000}', '\u{E0001}', '\u{E0FFF}', '\u{115F}', '\u{FFA0}', '\u{2060}',
+        ]);
+        refused.extend('\u{180B}'..='\u{180F}');
+        refused.extend('\u{FE00}'..='\u{FE0F}');
+        for c in refused {
+            for key in [format!("ab{c}cd"), format!("{c}abcd"), format!("abcd{c}")] {
+                let error = check_key_text(&key).expect_err(&format!("U+{:04X} was accepted in {key:?}", c as u32));
+                assert!(
+                    error.to_string().contains("surrounding whitespace or control characters"),
+                    "{error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_ordinary_key_and_an_inner_ascii_space_are_accepted() {
+        for key in ["0123456789abcdef0123456789abcdef", "a b", "key-with_symbols.~+/=", "é"] {
+            assert!(check_key_text(key).is_ok(), "{key:?}");
+        }
+        for key in [" a", "a ", "\ta", "a\n"] {
+            assert!(check_key_text(key).is_err(), "{key:?}");
+        }
+    }
+
+    #[test]
+    fn a_secret_is_masked_whatever_its_case() {
+        for echo in ["k'ey-abc", "K'EY-ABC", "k'EY-aBc", "K'ey-Abc"] {
+            assert_eq!(redact_secrets(&format!("echo [{echo}] end"), &["K'ey-Abc"]), "echo [***] end", "{echo}");
+        }
+        // Full case folding: ß is found as SS.
+        assert_eq!(redact_secrets("echo [STRASSE1] end", &["straße1"]), "echo [***] end");
+        assert_eq!(redact_secrets("echo [straße1] end", &["STRASSE1"]), "echo [***] end");
+        // Another case of the percent and JSON forms.
+        assert_eq!(redact_secrets("[K%2FEY]", &["k/ey"]), "[***]");
+        assert_eq!(redact_secrets(r#"[K\"EY]"#, &[r#"k"ey"#]), "[***]");
+        // A different secret is left alone.
+        assert_eq!(redact_secrets("echo [K'EZ-ABC] end", &["K'ey-Abc"]), "echo [K'EZ-ABC] end");
+    }
+
+    /// An upper-cased echo of a secret holding a quote, with the quote
+    /// spelled every way a server or proxy may, does not survive. Each
+    /// spelling alone needs its own decoder.
+    #[test]
+    fn an_upper_cased_echo_with_any_quote_spelling_does_not_survive() {
+        let secret = "k'ey1";
+        for (name, echo) in [
+            ("plain", "K'EY1"),
+            ("percent", "K%27EY1"),
+            ("backslash", r"K\'EY1"),
+            ("doubled", "K''EY1"),
+            ("hex, lower x", r"K\x27EY1"),
+            ("hex, upper X", r"K\X27EY1"),
+            ("named, lower", "K&apos;EY1"),
+            ("named, upper", "K&APOS;EY1"),
+            ("named, mixed", "K&Apos;EY1"),
+            ("decimal", "K&#39;EY1"),
+            ("hex reference", "K&#x27;EY1"),
+            ("hex reference, upper", "K&#X27;EY1"),
+            ("hex reference, no semicolon", "K&#39EY1"),
+            ("entity of the ampersand, then the quote", "K&amp;apos;EY1"),
+            ("percent of an upper-cased hex escape", "K%5CX27EY1"),
+        ] {
+            let got = redact_secrets(&format!("bad key [{echo}] here"), &[secret]);
+            assert!(got == CREDENTIAL_OMITTED_MESSAGE || got == "bad key [***] here", "{name}: {got}");
+        }
+    }
+
+    #[test]
+    fn every_quote_decoder_is_needed_on_its_own() {
+        let secret = "k'ey1";
+        for echo in [
+            "K%27EY1",
+            r"K\'EY1",
+            "K''EY1",
+            r"K\x27EY1",
+            r"K\X27EY1",
+            "K&apos;EY1",
+            "K&APOS;EY1",
+            "K&#39;EY1",
+            "K&#X27;EY1",
+        ] {
+            let got = redact_secrets(&format!("bad key [{echo}] here"), &[secret]);
+            assert!(got == CREDENTIAL_OMITTED_MESSAGE || got == "bad key [***] here", "{echo}: {got}");
+            assert!(!got.to_lowercase().contains("ey1"), "{echo}: {got}");
+        }
+        // Not the secret in any view: unchanged.
+        for echo in ["K%27EY2", r"K\'EY2", "K''EY2", r"K\X27EY2", "K&APOS;EY2", "K&#39;EY2"] {
+            let message = format!("bad key [{echo}] here");
+            assert_eq!(redact_secrets(&message, &[secret]), message, "{echo}");
+        }
+    }
+
+    #[test]
+    fn a_quote_in_each_secret_spelling_is_covered_for_a_key_and_a_password() {
+        let key = "ab'cd\"ef";
+        let password = "p@ss'w\"rd";
+        for secret in [key, password] {
+            let upper = secret.to_uppercase();
+            let spellings = [
+                upper.replace('\'', "&APOS;").replace('"', "&QUOT;"),
+                upper.replace('\'', r"\'").replace('"', r#"\""#),
+                upper.replace('\'', "''").replace('"', "\"\""),
+                upper.replace('\'', r"\X27").replace('"', r"\X22"),
+                upper.replace('\'', "%27").replace('"', "%22"),
+            ];
+            for spelling in spellings {
+                let got = redact_secrets(&format!("[{spelling}]"), &[key, password]);
+                assert!(got == CREDENTIAL_OMITTED_MESSAGE || got == "[***]", "{spelling}: {got}");
+            }
         }
     }
 }

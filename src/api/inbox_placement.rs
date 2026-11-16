@@ -290,6 +290,6 @@ impl ZeroBounce {
         }
         crate::utility::http_error::ensure_json_api_body(status, &content_type, &content)
             .map_err(|error| self.redact_error(error))?;
-        crate::utility::http_error::parse_json_body(&content)
+        crate::utility::http_error::parse_json_body_with_status(status, &content)
     }
 }

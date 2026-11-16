@@ -185,7 +185,162 @@ fn test_bulk_validate_result_json_error_http_200() {
 #[test]
 fn test_get_file_json_indicates_error_export() {
     assert!(get_file_json_indicates_error(r#"{"success":false,"message":""}"#));
-    assert!(!get_file_json_indicates_error(r#"{"file_id":"x"}"#));
+    // Any JSON object or array is an error, not a result file.
+    assert!(get_file_json_indicates_error(r#"{"file_id":"x"}"#));
+    assert!(get_file_json_indicates_error(r#"["x"]"#));
+    assert!(get_file_json_indicates_error("{not json"));
+    assert!(get_file_json_indicates_error("\u{FEFF}\u{FEFF}{not json"));
+    assert!(!get_file_json_indicates_error("email,status\n"));
+}
+
+/// What a download served with `content_type` and `body` comes back as.
+fn fetch_download(
+    status: usize,
+    content_type: Option<&str>,
+    body: &str,
+    headers: &[(&str, &str)],
+) -> Result<ZBBulkResponse, ZBError> {
+    let (mut mock_server, mut zb_instance) = instantiate();
+    // Never follow a redirect: the test mock has no second page to go to.
+    zb_instance.client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let mut mock = mock_server
+        .mock("GET", endpoint_matcher(ENDPOINT_FILE_RESULT))
+        .with_status(status)
+        .with_body(body);
+    if let Some(content_type) = content_type {
+        mock = mock.with_header("content-type", content_type);
+    }
+    for &(name, value) in headers {
+        mock = mock.with_header(name, value);
+    }
+    let mock = mock.create();
+    let response = zb_instance.bulk_validation_result_fetch("mock_file_id");
+    mock.assert();
+    response
+}
+
+#[test]
+fn test_bulk_validate_result_rejects_a_bom_before_json() {
+    let cases = [
+        ("one BOM", "\u{FEFF}{\"file_id\":\"x\"}"),
+        ("two BOMs", "\u{FEFF}\u{FEFF}{\"message\":\"No file.\"}"),
+        ("three BOMs and a list", "\u{FEFF}\u{FEFF}\u{FEFF}[\"x\"]"),
+        ("not json", "{not json"),
+        ("BOMs and not json", "\u{FEFF}\u{FEFF}{not json"),
+        ("plain object", "{\"file_id\":\"x\"}"),
+    ];
+    for (name, body) in cases {
+        let response = fetch_download(200, Some(CONTENT_TYPE_STREAM), body, &[]);
+        match response {
+            Err(ZBError::ApiError { status: 200, .. }) => {}
+            other => panic!("{name}: saved or wrong error: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_bulk_validate_result_bom_error_keeps_its_message() {
+    let response = fetch_download(
+        200,
+        Some(CONTENT_TYPE_STREAM),
+        "\u{FEFF}\u{FEFF}{\"message\":\"File deleted.\"}",
+        &[],
+    );
+    let Err(ZBError::ApiError { message, .. }) = response else {
+        panic!("expected ApiError, got {response:?}");
+    };
+    assert_eq!(message, "File deleted.");
+}
+
+#[test]
+fn test_bulk_validate_result_bom_only_body_is_empty() {
+    for body in ["\u{FEFF}", "\u{FEFF}\u{FEFF}\u{FEFF}", "\u{FEFF} \n\u{FEFF}"] {
+        let response = fetch_download(200, Some(CONTENT_TYPE_STREAM), body, &[]);
+        match response {
+            Err(ZBError::ApiError { status: 200, message }) => {
+                assert!(message.contains("Empty response"), "{message}");
+            }
+            other => panic!("{body:?}: saved or wrong error: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_bulk_validate_result_rejects_json_content_types() {
+    for content_type in [
+        "application/json",
+        "application/problem+json",
+        "application/vnd.api+JSON; charset=utf-8",
+        "Application/JSON",
+    ] {
+        // Whatever the body: even one that looks like a CSV.
+        let response = fetch_download(200, Some(content_type), "email,status\na@b.c,valid\n", &[]);
+        match response {
+            Err(ZBError::ApiError { status: 200, .. }) => {}
+            other => panic!("{content_type}: saved or wrong error: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_bulk_validate_result_plain_csv_with_or_without_bom_is_ok() {
+    for body in ["email,status\na@b.c,valid\n", "\u{FEFF}email,status\na@b.c,valid\n"] {
+        let response = fetch_download(200, Some("text/csv"), body, &[]);
+        let Ok(ZBBulkResponse::Content(content)) = response else {
+            panic!("{body:?}: expected Content, got {response:?}");
+        };
+        assert_eq!(content.as_ref(), body.as_bytes());
+    }
+}
+
+#[test]
+fn test_bulk_validate_result_rejects_an_encoded_body() {
+    for encoding in ["gzip", "br", "deflate", "zstd", "GZIP", "identity, gzip"] {
+        let response = fetch_download(
+            200,
+            Some("text/csv"),
+            "not really compressed",
+            &[("content-encoding", encoding)],
+        );
+        match response {
+            Err(ZBError::ApiError { status: 200, .. }) => {}
+            other => panic!("{encoding}: saved or wrong error: {other:?}"),
+        }
+    }
+    // `identity` and an empty value are the plain bytes.
+    for encoding in ["identity", "Identity", ""] {
+        let response = fetch_download(
+            200,
+            Some("text/csv"),
+            "email,status\n",
+            &[("content-encoding", encoding)],
+        );
+        assert!(response.is_ok(), "{encoding:?}: {response:?}");
+    }
+}
+
+#[test]
+fn test_bulk_validate_result_redirect_is_refused_without_a_content_type() {
+    for status in [301, 302, 303, 307, 308] {
+        // No Content-Type header, and a Location that must not be followed.
+        let response = fetch_download(
+            status,
+            None,
+            "",
+            &[("location", "http://127.0.0.1:1/elsewhere")],
+        );
+        let Err(ZBError::ApiError { status: seen, message }) = response else {
+            panic!("{status}: expected ApiError, got {response:?}");
+        };
+        assert_eq!(seen, status as u16);
+        assert_eq!(
+            message,
+            "ZeroBounce returned a redirect, which this client does not follow."
+        );
+    }
 }
 
 #[test]

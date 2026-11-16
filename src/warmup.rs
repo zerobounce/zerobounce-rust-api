@@ -197,6 +197,27 @@ impl ZeroBounceWarmup {
             .send()
             .map_err(|error| ZBError::ExplicitError(self.redact(&error.to_string(), secrets)))?;
         let status = response.status().as_u16();
+        // A redirect is refused before its body is read.
+        if (300..400).contains(&status) {
+            return Err(ZBError::api(
+                status,
+                crate::utility::http_error::REDIRECT_REFUSED_MESSAGE,
+            ));
+        }
+        // reqwest's decompression is not enabled, so an encoded body would be
+        // handed on as its raw compressed bytes.
+        let encodings: Vec<Option<&str>> = response
+            .headers()
+            .get_all(reqwest::header::CONTENT_ENCODING)
+            .iter()
+            .map(|value| value.to_str().ok())
+            .collect();
+        if crate::utility::bulk_get_file::content_encoding_is_transformed(encodings) {
+            return Err(ZBError::api(
+                status,
+                crate::utility::bulk_get_file::ENCODED_BODY_MESSAGE,
+            ));
+        }
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -221,12 +242,6 @@ impl ZeroBounceWarmup {
         })?;
         let text = String::from_utf8_lossy(&body).into_owned();
 
-        if (300..400).contains(&status) {
-            return Err(ZBError::api(
-                status,
-                crate::utility::http_error::REDIRECT_REFUSED_MESSAGE,
-            ));
-        }
         if status > 299 {
             return Err(ZBError::api(
                 status,
@@ -279,23 +294,23 @@ impl ZeroBounceWarmup {
     /// A CSV download, returned as text.
     fn csv(&self, path: &str, query: &HashMap<&str, String>) -> ZBResult<String> {
         let (status, content_type, text) = self.send("GET", path, query, None, &[])?;
-        // Not a CSV: an empty body, JSON (by content type, or an object or list
-        // whatever the content type) or an HTML page (by content type or body).
-        let trimmed = text.trim();
-        let json_body = (trimmed.starts_with('{') || trimmed.starts_with('['))
-            && matches!(
-                serde_json::from_str::<Value>(trimmed),
-                Ok(Value::Object(_) | Value::Array(_))
-            );
-        if trimmed.is_empty()
-            || content_type.to_ascii_lowercase().contains("application/json")
-            || json_body
+        // Not a CSV: an empty body (U+FEFF byte order marks are not content,
+        // and `trim` does not remove them), JSON (by content type, or a body
+        // that starts with `{` or `[` whether or not it parses) or an HTML
+        // page (by content type or body). A plain CSV, with or without a
+        // leading BOM, is returned as received.
+        let sniffed = crate::utility::bulk_get_file::strip_leading_boms(&text);
+        if sniffed.trim().is_empty()
+            || crate::utility::bulk_get_file::should_treat_get_file_body_as_error(
+                sniffed,
+                &content_type,
+            )
             || crate::utility::http_error::content_type_is_html(&content_type)
-            || crate::utility::http_error::body_looks_like_html(&text)
+            || crate::utility::http_error::body_looks_like_html(sniffed)
         {
             return Err(ZBError::api(
                 status,
-                self.redact(&message_from_body(status, &content_type, &text), &[]),
+                self.redact(&message_from_body(status, &content_type, sniffed), &[]),
             ));
         }
         Ok(text)

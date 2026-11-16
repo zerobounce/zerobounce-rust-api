@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # commit 686976e, 2026-10-09 (no release tag matches)
         with:
           components: rustfmt, clippy
 
@@ -57,7 +57,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust 1.88
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # commit 686976e, 2026-10-09 (no release tag matches)
         with:
           toolchain: "1.88"
 

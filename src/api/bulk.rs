@@ -95,6 +95,30 @@ impl ZeroBounce {
         // (`ZBError::ApiError`) and `status_code()` can tell a Cloudflare 403
         // from an API 400/404.
         let status = response.status();
+        // A redirect is refused before anything else is read from it: it is
+        // not followed, and it does not need a Content-Type.
+        if status.is_redirection() {
+            return Err(ZBError::api(
+                status.as_u16(),
+                crate::utility::http_error::REDIRECT_REFUSED_MESSAGE,
+            ));
+        }
+
+        // reqwest's decompression is not enabled, so an encoded body would be
+        // saved as its raw compressed bytes.
+        let encodings: Vec<Option<&str>> = response
+            .headers()
+            .get_all(reqwest::header::CONTENT_ENCODING)
+            .iter()
+            .map(|value| value.to_str().ok())
+            .collect();
+        if crate::utility::bulk_get_file::content_encoding_is_transformed(encodings) {
+            return Err(ZBError::api(
+                status.as_u16(),
+                crate::utility::bulk_get_file::ENCODED_BODY_MESSAGE,
+            ));
+        }
+
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
@@ -110,27 +134,37 @@ impl ZeroBounce {
             "getfile response exceeds size limit",
         )?;
         let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
+        // `trim` does not remove U+FEFF, so sniff and report on the body
+        // without its leading byte order marks. A body of nothing but BOMs
+        // is empty.
+        let sniffed = crate::utility::bulk_get_file::strip_leading_boms(&body_str);
 
         // An empty 200 is not a result file: there is nothing to save.
-        if crate::utility::http_error::body_looks_like_html(&body_str)
+        if crate::utility::http_error::body_looks_like_html(sniffed)
             || crate::utility::http_error::content_type_is_html(&content_type)
             || !status.is_success()
-            || body_str.trim().is_empty()
+            || sniffed.trim().is_empty()
         {
             return Err(ZBError::api(
                 status.as_u16(),
                 crate::utility::http_error::message_from_body(
                     status.as_u16(),
                     &content_type,
-                    &body_str,
+                    sniffed,
                 ),
             ));
         }
 
         if should_treat_get_file_body_as_error(&body_str, &content_type) {
-            let message = crate::utility::http_error::strip_error_prefix(
-                &format_get_file_error_message(body_str.trim()),
-            );
+            // Only a body that is valid JSON has a message to read; anything
+            // else (`{not json`, a CSV sent as JSON) gets the generic one.
+            let message = if serde_json::from_str::<serde_json::Value>(sniffed.trim()).is_ok() {
+                crate::utility::http_error::strip_error_prefix(&format_get_file_error_message(
+                    sniffed.trim(),
+                ))
+            } else {
+                String::new()
+            };
             if message.is_empty()
                 || message.len() > 500
                 || crate::utility::http_error::body_looks_like_html(&message)
@@ -140,7 +174,7 @@ impl ZeroBounce {
                     crate::utility::http_error::message_from_body(
                         status.as_u16(),
                         &content_type,
-                        &body_str,
+                        sniffed,
                     ),
                 ));
             }

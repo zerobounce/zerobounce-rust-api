@@ -21,7 +21,7 @@ zero-bounce = "4"
 ```
 
 Requires Rust 1.88 or newer (`rust-version = "1.88"`). Upgrading from 2.x? See the
-breaking changes in the [4.0.0 changelog](https://github.com/zerobounce/zerobounce-rust-api/blob/main/CHANGELOG.md#400---2026-11-12).
+breaking changes in the [4.0.0 changelog](https://github.com/zerobounce/zerobounce-rust-api/blob/main/CHANGELOG.md#400---2026-11-11).
 
 ## How to use
 This crate uses the zero-bounce API which requires an API key. Check [this guide](https://www.zerobounce.net/docs/api-dashboard#API_keys_management) to see how to grab yours.
@@ -866,7 +866,7 @@ warmup.add_sending_account(
 )?;
 ```
 
-Have ZeroBounce provision and send from the mailbox (`zb_managed`). Every field of `email_content` and `managed_sending` is optional and sent only when set; `timezone_offset` is -11.0 to 14.0 hours, fractional offsets such as 5.5 included. A 200 means the request was accepted; the mailbox is provisioned afterwards.
+Have ZeroBounce provision and send from the mailbox (`zb_managed`). Every field of `email_content` and `managed_sending` is optional and sent only when set; `timezone_offset` is -11.0 to 14.0 hours, fractional offsets such as 5.5 included. A 200 means the request was accepted; the mailbox is provisioned afterwards. The example uses `chrono::NaiveDate`. This crate does not re-export chrono, so add `chrono = "0.4"` next to `zero-bounce` or the example does not compile.
 
 ```rust
 use zero_bounce::{ZbManagedEmailContent, ZbManagedSending, ZeroBounceWarmup};

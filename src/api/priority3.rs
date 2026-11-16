@@ -37,8 +37,8 @@ fn post_bulk_root_form(
         .post(crate::parse_request_url(&url)?)
         .form(&form)
         .send()?;
-    let body = client.read_api_response(response)?;
-    crate::utility::http_error::parse_json_body(&body)
+    let (status, body) = client.read_api_response_with_status(response, false)?;
+    crate::utility::http_error::parse_json_body_with_status(status, &body)
 }
 
 /// POST one of the documented S3 / SFTP file jobs on the bulkapi root.
@@ -108,8 +108,8 @@ fn post_bulk_root_multipart(
         .post(crate::parse_request_url(&url)?)
         .multipart(form)
         .send()?;
-    let body = client.read_api_response(response)?;
-    crate::utility::http_error::parse_json_body(&body)
+    let (status, body) = client.read_api_response_with_status(response, false)?;
+    crate::utility::http_error::parse_json_body_with_status(status, &body)
 }
 
 /// `{bulk root}/{base}/{endpoint}` for the finder and domain search file APIs,
@@ -125,7 +125,13 @@ fn bulk_root_url_of(client: &ZeroBounce, base: &str, endpoint: &str) -> String {
 
 fn bulk_root_file_status(client: &ZeroBounce, base: &str, file_id: &str) -> ZBResult<String> {
     let url = bulk_root_url_of(client, base, "filestatus");
-    client.generic_get_request(url, HashMap::from([("file_id", file_id)]))
+    let (status, body) =
+        client.get_request_with_status(url, HashMap::from([("file_id", file_id)]), false)?;
+    // The raw string is the result, but only a real status object is one: a
+    // message-only body, `{}`, an array or any other JSON is the API's error.
+    crate::utility::http_error::require_status_object_body(status, "", &body)
+        .map_err(|error| client.redact_error(error))?;
+    Ok(body)
 }
 
 fn bulk_root_result_fetch(
@@ -259,8 +265,8 @@ impl ZeroBounce {
             .post(crate::parse_request_url(&url)?)
             .form(&form)
             .send()?;
-        let body = self.read_api_response(response)?;
-        crate::utility::http_error::parse_json_body(&body)
+        let (status, body) = self.read_api_response_with_status(response, false)?;
+        crate::utility::http_error::parse_json_body_with_status(status, &body)
     }
 
     /// Submit a file to bulk domain search (POST /domain-search/sendfile).
@@ -321,36 +327,40 @@ impl ZeroBounce {
             "/{}/",
             crate::utility::encode_path_segment(file_id)
         ));
-        let body = self.generic_get_request(url, HashMap::new())?;
-        crate::utility::http_error::parse_json_body(&body)
+        let (status, body) = self.get_request_with_status(url, HashMap::new(), false)?;
+        crate::utility::http_error::parse_json_body_with_status(status, &body)
     }
 
     pub fn add_filter(&self, rule: &str, target: &str, value: &str) -> ZBResult<Value> {
-        let body = self.generic_form_post_request(
+        let (status, body) = self.form_post_request_with_status(
             self.url_provider.url_of("/filters/add"),
             HashMap::from([("rule", rule), ("target", target), ("value", value)]),
         )?;
-        crate::utility::http_error::parse_json_body(&body)
+        crate::utility::http_error::parse_json_body_with_status(status, &body)
     }
 
     pub fn list_filters(&self, use_post: bool) -> ZBResult<Value> {
-        let body = if use_post {
-            self.generic_form_post_request(
+        let (status, body) = if use_post {
+            self.form_post_request_with_status(
                 self.url_provider.url_of("/filters/list"),
                 HashMap::new(),
             )?
         } else {
-            self.generic_get_request(self.url_provider.url_of("/filters/list"), HashMap::new())?
+            self.get_request_with_status(
+                self.url_provider.url_of("/filters/list"),
+                HashMap::new(),
+                false,
+            )?
         };
-        crate::utility::http_error::parse_json_body(&body)
+        crate::utility::http_error::parse_json_body_with_status(status, &body)
     }
 
     pub fn delete_filter(&self, rule: &str, target: &str, value: &str) -> ZBResult<Value> {
-        let body = self.generic_form_post_request(
+        let (status, body) = self.form_post_request_with_status(
             self.url_provider.url_of("/filters/delete"),
             HashMap::from([("rule", rule), ("target", target), ("value", value)]),
         )?;
-        crate::utility::http_error::parse_json_body(&body)
+        crate::utility::http_error::parse_json_body_with_status(status, &body)
     }
 
     pub fn list_s3_files(
@@ -370,8 +380,8 @@ impl ZeroBounce {
                 params.insert("search", search);
             }
         }
-        let body = self.generic_get_request(url, params)?;
-        crate::utility::http_error::parse_json_body(&body)
+        let (status, body) = self.get_request_with_status(url, params, false)?;
+        crate::utility::http_error::parse_json_body_with_status(status, &body)
     }
 
     /// Validate a file in your Amazon S3 bucket (POST /validateS3file).

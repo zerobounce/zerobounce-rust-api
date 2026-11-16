@@ -241,10 +241,10 @@ pub fn ensure_json_api_body(status: u16, content_type: &str, body: &str) -> ZBRe
 /// Whether a JSON body is nothing but a message: an object with no "success"
 /// field whose keys are all message keys. The keys decide, whatever the
 /// message's value (a string, blank, null or a list), since no result object
-/// has these keys.
+/// has these keys. An empty object (`{}`, `{ }`, `{\n}`) has no keys at all and
+/// is the same failure: no result object is empty either.
 fn message_only_body(object: &serde_json::Map<String, serde_json::Value>) -> bool {
-    !object.is_empty()
-        && !object.contains_key("success")
+    !object.contains_key("success")
         && object.keys().all(|key| MESSAGE_KEYS.contains(&key.as_str()))
 }
 
@@ -257,13 +257,27 @@ fn message_only_body(object: &serde_json::Map<String, serde_json::Value>) -> boo
 pub fn reject_message_only_body(status: u16, content_type: &str, body: &str) -> ZBResult<()> {
     if let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(body.trim()) {
         if message_only_body(&object) {
-            return Err(ZBError::api(
-                status,
-                message_from_body(status, content_type, body),
-            ));
+            let message = if object.is_empty() {
+                UNEXPECTED_JSON_SHAPE_MESSAGE.to_string()
+            } else {
+                message_from_body(status, content_type, body)
+            };
+            return Err(ZBError::api(status, message));
         }
     }
     Ok(())
+}
+
+/// For a call that hands back the raw body but whose answer is always a JSON
+/// object (the finder and domain search file status): a body that is not an
+/// object (an array, `0`, `"x"`, `null`), an empty object, or a message-only
+/// object is an [`ZBError::ApiError`] with the response status. Any other
+/// object, which is a real status, passes.
+pub fn require_status_object_body(status: u16, content_type: &str, body: &str) -> ZBResult<()> {
+    match serde_json::from_str::<serde_json::Value>(body.trim()) {
+        Ok(serde_json::Value::Object(_)) => reject_message_only_body(status, content_type, body),
+        _ => Err(ZBError::api(status, UNEXPECTED_JSON_SHAPE_MESSAGE)),
+    }
 }
 
 /// The message for a 2xx body that is valid JSON but not the shape the call
@@ -276,16 +290,26 @@ pub const UNEXPECTED_JSON_SHAPE_MESSAGE: &str =
 /// ([`ensure_json_api_body`]) as the call's result type. A body that does not
 /// fit is the API's answer, not a transport or SDK error: a
 /// [`ZBError::ApiError`] with status 200 and [`UNEXPECTED_JSON_SHAPE_MESSAGE`].
-/// The message carries no body content.
+/// The message carries no body content. Use [`parse_json_body_with_status`]
+/// where the response status is known: the error then carries it.
 ///
 /// A JSON array is never read into a struct: serde's derived structs also
 /// take their fields positionally from an array (`["x"]` would fill the first
 /// field), so the body is read through [`ObjectsOnly`], which offers a struct
 /// only a JSON object, at every depth.
 pub fn parse_json_body<T: serde::de::DeserializeOwned>(body: &str) -> ZBResult<T> {
+    parse_json_body_with_status(200, body)
+}
+
+/// [`parse_json_body`], with a wrong-shape error that carries the response's
+/// own `status` instead of a hard-coded 200.
+pub fn parse_json_body_with_status<T: serde::de::DeserializeOwned>(
+    status: u16,
+    body: &str,
+) -> ZBResult<T> {
     serde_json::from_str::<serde_json::Value>(body)
         .and_then(|value| T::deserialize(ObjectsOnly(value)))
-        .map_err(|_| ZBError::api(200, UNEXPECTED_JSON_SHAPE_MESSAGE))
+        .map_err(|_| ZBError::api(status, UNEXPECTED_JSON_SHAPE_MESSAGE))
 }
 
 /// A [`serde_json::Value`] deserializer that refuses an array where a struct
@@ -475,5 +499,62 @@ mod test {
         assert_eq!(prefix_at_char_boundary("aé", 2), "a");
         assert_eq!(prefix_at_char_boundary("aé", 3), "aé");
         assert_eq!(prefix_at_char_boundary("", 0), "");
+    }
+
+    fn reject(status: u16, body: &str) -> ZBResult<()> {
+        reject_message_only_body(status, JSON, body)
+    }
+
+    /// An empty object is the same failure as a message-only one, whatever
+    /// whitespace JSON allows inside it.
+    #[test]
+    fn an_empty_object_is_rejected_as_message_only() {
+        for body in ["{}", "{ }", "{\n}", "{\t}", "{\r\n \t}", " {} "] {
+            match reject(202, body) {
+                Err(ZBError::ApiError { status: 202, message }) => {
+                    assert_eq!(message, UNEXPECTED_JSON_SHAPE_MESSAGE, "{body:?}")
+                }
+                other => panic!("{body:?}: {other:?}"),
+            }
+        }
+        // Not message-only: a result, a greylist-style row, a success flag.
+        assert!(reject(200, r#"{"domain":null}"#).is_ok());
+        assert!(reject(200, r#"{"Message":"m","status":"unknown"}"#).is_ok());
+        assert!(reject(200, r#"{"success":true,"message":"m"}"#).is_ok());
+    }
+
+    #[test]
+    fn parse_json_body_with_status_carries_the_status() {
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct Row {
+            id: u32,
+        }
+        for status in [200, 201, 299] {
+            match parse_json_body_with_status::<Row>(status, r#"{"id":"x"}"#) {
+                Err(ZBError::ApiError { status: got, message }) => {
+                    assert_eq!(got, status);
+                    assert_eq!(message, UNEXPECTED_JSON_SHAPE_MESSAGE);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        match parse_json_body::<Row>(r#"[1]"#) {
+            Err(ZBError::ApiError { status: 200, .. }) => {}
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_status_body_must_be_a_real_status_object() {
+        for body in ["{}", "{ }", "[]", r#"[{"file_status":"x"}]"#, "0", r#""x""#, "null",
+            r#"{"message":"m"}"#, r#"{"Message":null}"#, r#"{"error":""}"#] {
+            match require_status_object_body(203, JSON, body) {
+                Err(ZBError::ApiError { status: 203, .. }) => {}
+                other => panic!("{body}: {other:?}"),
+            }
+        }
+        assert!(require_status_object_body(200, JSON, r#"{"success":true,"file_status":"Complete"}"#).is_ok());
+        assert!(require_status_object_body(200, JSON, r#"{"file_status":"Processing"}"#).is_ok());
     }
 }

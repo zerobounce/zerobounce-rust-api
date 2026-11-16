@@ -167,6 +167,20 @@ pub struct FindEmailResponseV2 {
 /// Response structure for the new domain_search_v2 API endpoint.
 /// This structure matches the domain search API response format which includes
 /// `format`, `confidence`, and `other_domain_formats` fields.
+/// The JSON names of [`DomainSearchResponseV2`]'s fields. Every field defaults,
+/// because the live API leaves out the ones that do not apply, so serde accepts
+/// any object; a body that carries none of these names is not a domain search
+/// answer.
+pub(crate) const DOMAIN_SEARCH_V2_FIELD_NAMES: [&str; 7] = [
+    "domain",
+    "company_name",
+    "format",
+    "confidence",
+    "did_you_mean",
+    "failure_reason",
+    "other_domain_formats",
+];
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct DomainSearchResponseV2 {
     #[serde(default, deserialize_with = "null_as_default")]
@@ -194,6 +208,24 @@ mod tests {
     use crate::utility::mock_constants::ACTIVITY_DATA_RESPONSE_INACTIVE;
     use crate::utility::mock_constants::MOCK_FIND_MAIL_INVALID;
     use crate::utility::mock_constants::MOCK_FIND_MAIL_VALID;
+
+    #[test]
+    fn the_domain_search_field_names_are_the_struct_fields() {
+        let all = serde_json::json!({
+            "domain": 1, "company_name": 1, "format": 1, "confidence": 1,
+            "did_you_mean": 1, "failure_reason": 1, "other_domain_formats": 1,
+        });
+        let mut names: Vec<&str> = all.as_object().unwrap().keys().map(String::as_str).collect();
+        let mut listed = DOMAIN_SEARCH_V2_FIELD_NAMES.to_vec();
+        names.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(names, listed);
+        // Each listed name is a field serde reads (a wrong type fails it).
+        for name in DOMAIN_SEARCH_V2_FIELD_NAMES {
+            let body = serde_json::json!({ name: [1, 2, 3, {"x": 1}] });
+            assert!(serde_json::from_value::<DomainSearchResponseV2>(body).is_err(), "{name}");
+        }
+    }
 
     #[test]
     fn parse_activity_date_without_amount() {
