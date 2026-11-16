@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-11-16
+
 ### Added
 
 - `ZeroBounceWarmup::add_zb_managed_sending_account(from_address, ignore_conflict, email_content, managed_sending)`, with `ZbManagedEmailContent` (`company_name`, `company_website`, `company_description`, `types_of_emails`, `example_email`) and `ZbManagedSending` (`weekdays_only`, `timezone`, `timezone_offset` as an `f64` from -11.0 to 14.0, `warmup_start_date`): the `zb_managed` payload as the API documents it. Each field is sent only when set. Both structs are `#[non_exhaustive]`: build them from `Default::default()` and assign fields. A `timezone_offset` outside -11.0 to 14.0, or NaN, is `ZBError::ExplicitError("timezone_offset must be -11.0 to 14.0")` before a request.
@@ -208,7 +210,8 @@ No library code changes from 2.1.2; only the crate version changed.
 
 - Initial client for validation, credits, activity, and bulk file calls.
 
-[Unreleased]: https://github.com/zerobounce/zerobounce-rust-api/compare/v4.0.1...HEAD
+[Unreleased]: https://github.com/zerobounce/zerobounce-rust-api/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/zerobounce/zerobounce-rust-api/compare/v4.0.1...v4.1.0
 [4.0.1]: https://github.com/zerobounce/zerobounce-rust-api/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/zerobounce/zerobounce-rust-api/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/zerobounce/zerobounce-rust-api/compare/v2.1.3...v3.0.0
