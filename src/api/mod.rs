@@ -180,7 +180,9 @@ impl ZeroBounce {
             self.url_provider.url_of(ENDPOINT_ACTIVITY_DATA), query_args, false
         )?;
 
-        let activity_data = parse_json_body_with_status::<ActivityData>(status, &response_content)?;
+        let activity_data = crate::utility::http_error::parse_unless_message_beside_nulls::<ActivityData>(
+            status, &response_content, &["found", "active_in_days"],
+        )?;
         Ok(activity_data)
     }
 
@@ -193,7 +195,9 @@ impl ZeroBounce {
             false,
         )?;
 
-        let score = parse_json_body_with_status::<ScoreEmailResponse>(status, &response_content)?;
+        let score = crate::utility::http_error::parse_unless_message_beside_nulls::<ScoreEmailResponse>(
+            status, &response_content, &["email", "score"],
+        )?;
         Ok(score)
     }
 
@@ -205,7 +209,9 @@ impl ZeroBounce {
             form_args,
         )?;
 
-        let score = parse_json_body_with_status::<ScoreEmailResponse>(status, &response_content)?;
+        let score = crate::utility::http_error::parse_unless_message_beside_nulls::<ScoreEmailResponse>(
+            status, &response_content, &["email", "score"],
+        )?;
         Ok(score)
     }
 

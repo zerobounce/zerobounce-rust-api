@@ -1968,6 +1968,9 @@ fn plaintext_client(port: u16, key: &str) -> ZeroBounce {
     zb.client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::none())
+        // The name resolves only through the override below, so an
+        // HTTP(S)_PROXY in the environment must not take the request.
+        .no_proxy()
         .resolve(
             PLAIN_HOST,
             std::net::SocketAddr::from(([127, 0, 0, 1], port)),

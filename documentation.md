@@ -224,6 +224,10 @@ rules as `bulk_validation_result_fetch`: the file bytes come back as
 `ZBBulkResponse::Content`, while a JSON body — including an HTTP 200 carrying
 `{"success": false}` — is an `Err` with a short message.
 
+A result file is read whole into memory, up to 256 MB; a larger one is an
+`Err` ("getfile response exceeds size limit"). The body of an error response
+(any non-2xx status) is read only up to 16 MB, the cap every JSON answer has.
+
 ## Per-API base URLs
 
 The list evaluator and the Inbox Placement Tester have their own base URLs,

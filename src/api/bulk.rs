@@ -33,7 +33,7 @@ impl ZeroBounce {
         let response = self.client.post(url).multipart(multi_part_form).send()?;
 
         let (status, response_content) = self.read_api_response_with_status(response, false)?;
-        crate::utility::http_error::parse_json_body_with_status(status, &response_content)
+        crate::utility::http_error::parse_unless_message_beside_nulls(status, &response_content, &["success", "file_name", "file_id"])
     }
 
     fn generic_file_status_check(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileStatus> {
@@ -132,7 +132,13 @@ impl ZeroBounce {
 
         let body_bytes = crate::utility::read_limited(
             response,
-            crate::utility::MAX_GETFILE_BYTES,
+            // Only a successful result file may be large; an error body gets
+            // the normal error-body cap.
+            if status.is_success() {
+                crate::utility::MAX_GETFILE_BYTES
+            } else {
+                crate::utility::MAX_JSON_RESPONSE_BYTES
+            },
             status.as_u16(),
             "getfile response exceeds size limit",
         )?;
@@ -208,7 +214,7 @@ impl ZeroBounce {
 
         let (status, response_content) = self.get_request_with_status(url, query_args, false)?;
 
-        crate::utility::http_error::parse_json_body_with_status(status, &response_content)
+        crate::utility::http_error::parse_unless_message_beside_nulls(status, &response_content, &["success", "file_name", "file_id"])
     }
 
     fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback> {

@@ -308,7 +308,7 @@ mod helper_tests {
         let secret = secret();
         for sequence in sequences() {
             let echo = format!("Bad [{}] end", apply(sequence, &secret));
-            assert!(leaking(std::slice::from_ref(&echo), &secret).is_some(), "{sequence:?}: {echo}");
+            assert!(leaking(std::slice::from_ref(&echo), &secret).is_some(), "{sequence:?}: echo of {} bytes", echo.len());
         }
         assert!(leaking(&["Bad [***] end".to_string()], &secret).is_none());
     }

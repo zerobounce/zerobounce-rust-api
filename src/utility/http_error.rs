@@ -302,6 +302,24 @@ pub(crate) fn object_has_non_null_named_field(
         .any(|name| matches!(object.get(*name), Some(value) if !value.is_null()))
 }
 
+/// Parse a body as `T`, but a message beside only absent or null result fields
+/// (`{"message":"m","success":null}`) is not a result: it is an
+/// [`ZBError::ApiError`] with the response status and
+/// [`UNEXPECTED_JSON_SHAPE_MESSAGE`]. With no message key, nulls stay a result.
+/// `names` are the result's own fields (not message keys).
+pub(crate) fn parse_unless_message_beside_nulls<T: serde::de::DeserializeOwned>(
+    status: u16,
+    body: &str,
+    names: &[&str],
+) -> ZBResult<T> {
+    if let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(body) {
+        if object_has_message_key(&object) && !object_has_non_null_named_field(&object, names) {
+            return Err(ZBError::api(status, UNEXPECTED_JSON_SHAPE_MESSAGE));
+        }
+    }
+    parse_json_body_with_status(status, body)
+}
+
 pub fn require_status_object_body(status: u16, content_type: &str, body: &str) -> ZBResult<()> {
     match serde_json::from_str::<serde_json::Value>(body.trim()) {
         Ok(serde_json::Value::Object(object)) => {
@@ -331,7 +349,7 @@ pub const UNEXPECTED_JSON_SHAPE_MESSAGE: &str =
 ///
 /// A JSON array is never read into a struct: serde's derived structs also
 /// take their fields positionally from an array (`["x"]` would fill the first
-/// field), so the body is read through [`ObjectsOnly`], which offers a struct
+/// field), so the body is read through `ObjectsOnly`, which offers a struct
 /// only a JSON object, at every depth.
 pub fn parse_json_body<T: serde::de::DeserializeOwned>(body: &str) -> ZBResult<T> {
     parse_json_body_with_status(200, body)

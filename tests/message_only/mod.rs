@@ -292,3 +292,62 @@ fn an_empty_object_is_still_a_result_where_message_only_is_not_a_failure() {
     zb.validate_email("a@b.com").expect("a greylist answer is a result");
     mock.assert();
 }
+
+/// A message beside fields that are all null is the API's error, not a result
+/// (lesson 79). With no message key, nulls stay a result.
+#[test]
+#[allow(deprecated)]
+fn a_message_beside_null_fields_is_an_api_error_on_every_typed_call() {
+    use zero_bounce::{ZBFile, ZeroBounce};
+    type Call = fn(&ZeroBounce) -> zero_bounce::utility::ZBResult<()>;
+    let feedback = r#"{"success":null,"message":"m","file_name":null,"file_id":null}"#;
+    let calls: Vec<(&str, &str, Call)> = vec![
+        ("GET", r#"{"message":"m","found":null,"active_in_days":null}"#, |zb| zb.get_activity_data("a@b.com").map(|_| ())),
+        ("GET", r#"{"message":"m","email":null,"score":null}"#, |zb| zb.score_email("a@b.com").map(|_| ())),
+        ("POST", r#"{"message":"m","email":null,"score":null}"#, |zb| zb.score_email_post("a@b.com").map(|_| ())),
+        ("GET", r#"{"message":"m","email":null,"domain":null}"#, |zb| {
+            zb.find_email_v2().first_name("J").domain("example.com").call().map(|_| ())
+        }),
+        ("GET", r#"{"message":"m","domain":null,"format":null}"#, |zb| {
+            zb.domain_search_v2().domain("example.com").call().map(|_| ())
+        }),
+        ("POST", feedback, |zb| zb.bulk_validation_file_submit(&ZBFile::from_content(b"a@b.com\n".to_vec())).map(|_| ())),
+        ("POST", feedback, |zb| zb.ai_scoring_file_submit(&ZBFile::from_content(b"a@b.com\n".to_vec())).map(|_| ())),
+        ("GET", feedback, |zb| zb.bulk_validation_result_delete("f").map(|_| ())),
+        ("GET", feedback, |zb| zb.ai_scoring_result_delete("f").map(|_| ())),
+        ("GET", feedback, |zb| zb.email_finder_result_delete("f").map(|_| ())),
+        ("GET", feedback, |zb| zb.domain_search_result_delete("f").map(|_| ())),
+        ("POST", feedback, |zb| zb.send_evaluated_file("f").map(|_| ())),
+        ("POST", feedback, |zb| zb.validate_s3_file("f.csv", true, None, "https://example.com/r").map(|_| ())),
+    ];
+    let mut failures = Vec::new();
+    for (i, (method, body, call)) in calls.iter().enumerate() {
+        let (mut server, zb) = instantiate();
+        let mock = server
+            .mock(method, mockito::Matcher::Any)
+            .with_status(202)
+            .with_header("content-type", CONTENT_TYPE_JSON)
+            .with_body(body)
+            .create();
+        let outcome = call(&zb);
+        mock.assert();
+        match outcome {
+            Err(error)
+                if error.status_code() == Some(202)
+                    && error.to_string() == UNEXPECTED_JSON_SHAPE_MESSAGE => {}
+            other => failures.push(format!("call #{i} {body}: {other:?}")),
+        }
+    }
+    assert!(failures.is_empty(), "not an ApiError 202:\n{}", failures.join("\n"));
+
+    // No message key: nulls stay a result.
+    let (mut server, zb) = instantiate();
+    let mock = json_mock(&mut server, ENDPOINT_ACTIVITY_DATA, r#"{"found":null,"active_in_days":null}"#);
+    zb.get_activity_data("a@b.com").expect("nulls without a message are a result");
+    mock.assert();
+    // A real value next to a message is still a result.
+    let (mut server, zb) = instantiate();
+    let mock = json_mock(&mut server, ENDPOINT_SCORING, r#"{"message":"m","email":"a@b.com","score":3}"#);
+    assert_eq!(zb.score_email("a@b.com").expect("a real value is a result").score, 3);
+    mock.assert();
+}

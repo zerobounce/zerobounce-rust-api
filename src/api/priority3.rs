@@ -38,7 +38,7 @@ fn post_bulk_root_form(
         .form(&form)
         .send()?;
     let (status, body) = client.read_api_response_with_status(response, false)?;
-    crate::utility::http_error::parse_json_body_with_status(status, &body)
+    crate::utility::http_error::parse_unless_message_beside_nulls(status, &body, &["success", "file_name", "file_id"])
 }
 
 /// POST one of the documented S3 / SFTP file jobs on the bulkapi root.
@@ -109,7 +109,7 @@ fn post_bulk_root_multipart(
         .multipart(form)
         .send()?;
     let (status, body) = client.read_api_response_with_status(response, false)?;
-    crate::utility::http_error::parse_json_body_with_status(status, &body)
+    crate::utility::http_error::parse_unless_message_beside_nulls(status, &body, &["success", "file_name", "file_id"])
 }
 
 /// `{bulk root}/{base}/{endpoint}` for the finder and domain search file APIs,
@@ -266,7 +266,7 @@ impl ZeroBounce {
             .form(&form)
             .send()?;
         let (status, body) = self.read_api_response_with_status(response, false)?;
-        crate::utility::http_error::parse_json_body_with_status(status, &body)
+        crate::utility::http_error::parse_unless_message_beside_nulls(status, &body, &["success", "file_name", "file_id"])
     }
 
     /// Submit a file to bulk domain search (POST /domain-search/sendfile).

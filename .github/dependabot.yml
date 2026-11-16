@@ -38,3 +38,26 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "06:00"
+      timezone: Europe/Bucharest
+    open-pull-requests-limit: 0
+    # Keep the rust base image on 1.88 (the MSRV floor): no major/minor bumps.
+    ignore:
+      - dependency-name: "rust"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+    labels:
+      - "dependabot-security"
+      - "docker dependencies"
+    groups:
+      docker-security:
+        applies-to: security-updates
+        patterns:
+          - "*"

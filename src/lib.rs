@@ -223,6 +223,10 @@ fn has_userinfo_marker(url: &str) -> bool {
     authority.contains('@')
 }
 
+/// Fixed refusal texts of [`parse_request_url`]; the Warmup client matches them.
+pub(crate) const USERINFO_MESSAGE: &str = "request URL must not contain a username or password";
+pub(crate) const URL_TEXT_MESSAGE: &str = "request URL must not contain a query, a fragment, a backslash, whitespace or control characters";
+
 /// Parse a request URL and enforce the transport rule every request follows:
 /// `https://`, or `http://` only for the exact loopback hosts `127.0.0.1`,
 /// `localhost` and `[::1]`. Every request path calls this on its final URL,
@@ -238,17 +242,24 @@ pub(crate) fn parse_request_url(url: &str) -> ZBResult<reqwest::Url> {
         .map_err(|_| ZBError::ExplicitError("request URL is not a valid URL".into()))?;
     if !parsed.username().is_empty() || parsed.password().is_some() || has_userinfo_marker(url) {
         return Err(ZBError::ExplicitError(
-            "request URL must not contain a username or password".into(),
+            USERINFO_MESSAGE.into(),
         ));
     }
-    if parsed.scheme() == "https" {
-        return Ok(parsed);
-    }
-    if parsed.scheme() == "http" {
-        match parsed.host_str() {
-            Some("127.0.0.1") | Some("localhost") | Some("[::1]") => return Ok(parsed),
-            _ => {}
+    let scheme_ok = parsed.scheme() == "https"
+        || (parsed.scheme() == "http"
+            && matches!(parsed.host_str(), Some("127.0.0.1") | Some("localhost") | Some("[::1]")));
+    if scheme_ok {
+        // The SDK adds its own path and query, so a query or fragment in the
+        // URL, or whitespace, a control or an invisible character anywhere in
+        // it, would send the request somewhere else.
+        if url.contains(['?', '#', '\\'])
+            || url.chars().any(|c| {
+                c.is_control() || c.is_whitespace() || utility::is_invisible_char(c)
+            })
+        {
+            return Err(ZBError::ExplicitError(URL_TEXT_MESSAGE.into()));
         }
+        return Ok(parsed);
     }
     Err(ZBError::ExplicitError(
         "request URL must use https:// (http:// is allowed only for 127.0.0.1, localhost and [::1])"

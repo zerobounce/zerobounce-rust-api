@@ -145,8 +145,11 @@ impl ZeroBounceWarmup {
         crate::utility::check_key_text(api_key)?;
         // https only, with the same loopback exception the validation client
         // makes so the offline suite can point at a local fake.
-        crate::parse_request_url(base_url)
-            .map_err(|_| ZBError::explicit("base_url must be an https:// URL"))?;
+        crate::parse_request_url(base_url).map_err(|error| match error.to_string().as_str() {
+            // Specific refusals keep their own fixed text.
+            m if m == crate::USERINFO_MESSAGE || m == crate::URL_TEXT_MESSAGE => error,
+            _ => ZBError::explicit("base_url must be an https:// URL"),
+        })?;
         Ok(ZeroBounceWarmup {
             api_key: api_key.to_string(),
             root: format!("{}{BASE_PATH}", base_url.trim_end_matches('/')),
@@ -224,7 +227,9 @@ impl ZeroBounceWarmup {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_string();
-        let max_bytes = if content_type.starts_with("text/csv") {
+        // Only a successful result file may be large; an error body is read
+        // up to the normal error-body cap.
+        let max_bytes = if content_type.starts_with("text/csv") && status <= 299 {
             crate::utility::MAX_GETFILE_BYTES
         } else {
             crate::utility::MAX_JSON_RESPONSE_BYTES

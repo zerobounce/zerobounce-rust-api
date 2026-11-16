@@ -29,7 +29,8 @@
 //! No key is ever written to a file or printed. Keys come from the environment.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use chrono::{Duration as ChronoDuration, Utc};
 use zero_bounce::api::inbox_placement::ListInboxPlacementTestsOptions;
@@ -42,9 +43,18 @@ const UNKNOWN_ID: &str = "0d1b7a4e-1111-2222-3333-444455556666";
 const CALLBACK: &str = "https://example.com/zerobounce-sdk-live-test";
 const SANDBOX: &str = "valid@example.com";
 
+/// How long the bulk delete is retried, and how often. See the delete check
+/// for the measurements behind the budget.
+const DELETE_BUDGET_SECONDS: u64 = 720;
+const DELETE_POLL_SECONDS: u64 = 10;
+
 static PASSED: AtomicUsize = AtomicUsize::new(0);
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 static SKIPPED: AtomicUsize = AtomicUsize::new(0);
+
+/// Bulk jobs this run uploaded but could not delete again. A live run must
+/// never leave one behind unannounced, so they are printed with the summary.
+static LEAKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn api_key() -> String {
     std::env::var("ZEROBOUNCE_API_KEY").unwrap_or_default().trim().to_string()
@@ -135,6 +145,20 @@ fn live_api_suite() {
         PASSED.load(Ordering::Relaxed),
         SKIPPED.load(Ordering::Relaxed)
     );
+    // Printed before the assert below, which panics: a leaked job must be
+    // announced even on a failing run, because that is exactly when it leaks.
+    let leaked = LEAKED.lock().unwrap();
+    if !leaked.is_empty() {
+        println!("\n!!! BULK JOBS LEFT ON THE LIVE ACCOUNT -- delete them by hand:");
+        for id in leaked.iter() {
+            println!("  !!! file_id {id}");
+        }
+        println!(
+            "      GET https://bulkapi.zerobounce.net/v2/deletefile\
+             ?api_key=<key>&file_id=<id>"
+        );
+    }
+    drop(leaked);
     assert_eq!(failed, 0, "{failed} live checks failed");
 }
 
@@ -397,7 +421,10 @@ fn validation_spend() {
     );
 
     let mut file_id = None;
-    check("bulk validation round trip: upload, status, delete", || -> Result<(), String> {
+    // The delete half of the round trip is the check below, which needs its own
+    // budget -- naming it here too is what sent a reader looking for a delete
+    // this body never performs.
+    check("bulk validation round trip: upload and status", || -> Result<(), String> {
         let csv = b"email\nvalid@example.com\ninvalid@example.com\n".to_vec();
         let file = ZBFile::from_content_with_filename(csv, "zb-sdk-live.csv");
         let sent = zb.bulk_validation_file_submit(&file).map_err(|e| e.to_string())?;
@@ -418,19 +445,50 @@ fn validation_spend() {
             "upload did not produce a file id",
         ),
         Some(id) => check("the uploaded validation job is deleted again", || -> Result<(), String> {
-            // LIVE: a just-accepted job answers "File cannot be found" for a
-            // short while, so the delete is retried rather than leaving it behind.
-            let mut last = String::new();
-            for _ in 0..12 {
+            // LIVE: a bulk job cannot be deleted until the API has finished
+            // processing it. Until then deletefile answers "File cannot be
+            // found." on an HTTP 200, which says nothing about the real state
+            // -- the job is there, filestatus returns it, it just is not
+            // deletable yet. The old fixed 12 x 10s window silently left paid
+            // jobs on the account whenever the queue was slow.
+            //
+            // Measured by uploading a two-row file and polling every 10s: it
+            // became deletable after 132s and 138s on a quiet queue, matching
+            // the 126-130s measured for the C# suite, against about 10 minutes
+            // on a busy one. The wait is queue time, so no window is
+            // guaranteed, and file_status is not a usable gate either -- the
+            // job reads "Processing", and can read "Complete", while the
+            // delete still refuses. The delete is therefore its own probe:
+            // tried once up front and again every DELETE_POLL_SECONDS, so an
+            // ordinary run costs the ~2 minutes the queue really takes rather
+            // than the whole budget. The budget is deliberately generous,
+            // because the alternative to waiting is leaving a job behind on
+            // the live account.
+            let deadline = Instant::now() + Duration::from_secs(DELETE_BUDGET_SECONDS);
+            // Always set by the Err arm below before the loop can break.
+            let mut last;
+            let mut state = "unknown".to_string();
+            loop {
                 match zb.bulk_validation_result_delete(&id) {
                     Ok(_) => return Ok(()),
-                    Err(error) => {
-                        last = redact(&error.to_string());
-                        std::thread::sleep(Duration::from_secs(10));
+                    Err(error) => last = redact(&error.to_string()),
+                }
+                if Instant::now() >= deadline {
+                    break;
+                }
+                if let Ok(status) = zb.bulk_validation_file_status_check(&id) {
+                    if !status.file_status.is_empty() {
+                        state = status.file_status.clone();
                     }
                 }
+                std::thread::sleep(Duration::from_secs(DELETE_POLL_SECONDS));
             }
-            Err(format!("could not delete {id} after retrying: {last}"))
+            // Never give up quietly: the job is still on the live account.
+            LEAKED.lock().unwrap().push(id.clone());
+            Err(format!(
+                "could not delete {id} within {DELETE_BUDGET_SECONDS}s \
+                 (last file_status: {state}, last error: {last})"
+            ))
         }()),
     }
 }

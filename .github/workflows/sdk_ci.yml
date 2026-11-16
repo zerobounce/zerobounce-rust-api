@@ -35,6 +35,12 @@ jobs:
       - name: Run tests
         run: cargo test --no-fail-fast
 
+      # Broken intra-doc links and bare URLs in rustdoc fail the build.
+      - name: Rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
+
       # Exercises the `include` list in Cargo.toml: lists what would ship to crates.io, then
       # builds the crate from that packaged copy, so a file the build needs but `include`
       # leaves out fails here rather than at publish time.
@@ -66,3 +72,17 @@ jobs:
 
       - name: Run tests
         run: cargo test --no-fail-fast
+
+  docker:
+    name: Docker test image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker build -t zerobounce-rust-test .
+
+      - name: Run the tests in the image
+        run: docker run --rm --network=none zerobounce-rust-test

@@ -16,7 +16,7 @@ pub use bulk_get_file::{format_get_file_error_message, get_file_json_indicates_e
 /// ignorables, variation selectors, Hangul, braille and Mongolian blanks, and
 /// the Unicode format (Cf) characters that std cannot classify. A key that
 /// holds one looks like a different key on screen.
-fn is_invisible_char(c: char) -> bool {
+pub(crate) fn is_invisible_char(c: char) -> bool {
     matches!(
         c,
         '\u{00AD}'
@@ -872,6 +872,13 @@ mod case_and_quote_tests {
             '\u{FFF8}', '\u{E0000}', '\u{E0001}', '\u{E0FFF}', '\u{115F}', '\u{FFA0}', '\u{2060}',
             '\u{202E}', '\u{2066}', '\u{0600}', '\u{00AD}', '\u{FFF9}', '\u{1D173}', '\u{0890}', '\u{0891}',
         ]);
+        // One from each remaining range of the match, so deleting any range fails.
+        refused.extend([
+            '\u{061C}', '\u{06DD}', '\u{070F}', '\u{08E2}', '\u{1160}', '\u{17B4}', '\u{17B5}', '\u{110BD}',
+            '\u{110CD}',
+        ]);
+        refused.extend('\u{13430}'..='\u{1343F}');
+        refused.extend('\u{1BCA0}'..='\u{1BCA3}');
         refused.extend('\u{180B}'..='\u{180F}');
         refused.extend('\u{FE00}'..='\u{FE0F}');
         for c in refused {
@@ -1221,11 +1228,11 @@ mod response_limit_tests {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ApiBaseUrl {
-    /// Default API URL: https://api.zerobounce.net/v2/
+    /// Default API URL: <https://api.zerobounce.net/v2/>
     Default,
-    /// USA API URL: https://api-us.zerobounce.net/v2/
+    /// USA API URL: <https://api-us.zerobounce.net/v2/>
     USA,
-    /// EU API URL: https://api-eu.zerobounce.net/v2/
+    /// EU API URL: <https://api-eu.zerobounce.net/v2/>
     EU,
 }
 
