@@ -416,6 +416,24 @@ impl<'a> FindEmailV2Builder<'a> {
             self.client.url_provider.url_of(ENDPOINT_EMAIL_FINDER), query_args, true
         )?;
 
+        // A message beside fields that are all missing or null (`{"detail":"x","email":null}`)
+        // is not a found address. `{"email":null}` with no message stays a result.
+        let body = parse_json_body_with_status::<serde_json::Value>(status, &response_content)?;
+        if let Some(object) = body.as_object() {
+            const NAMES: [&str; 6] = [
+                "email",
+                "domain",
+                "email_confidence",
+                "company_name",
+                "did_you_mean",
+                "failure_reason",
+            ];
+            if crate::utility::http_error::object_has_message_key(object)
+                && !crate::utility::http_error::object_has_non_null_named_field(object, &NAMES)
+            {
+                return Err(ZBError::api(status, UNEXPECTED_JSON_SHAPE_MESSAGE));
+            }
+        }
         let find_email_response =
             parse_json_body_with_status::<FindEmailResponseV2>(status, &response_content)?;
         Ok(find_email_response)
@@ -476,10 +494,21 @@ impl<'a> DomainSearchV2Builder<'a> {
         // `{"message":"m","file_id":null}` included. An object that carries none
         // of the struct's field names is not a domain search answer.
         let body = parse_json_body_with_status::<serde_json::Value>(status, &response_content)?;
-        let has_a_field = body
-            .as_object()
-            .is_some_and(|object| DOMAIN_SEARCH_V2_FIELD_NAMES.iter().any(|name| object.contains_key(*name)));
-        if !has_a_field {
+        let object = body.as_object();
+        let named = object.is_some_and(|object| {
+            DOMAIN_SEARCH_V2_FIELD_NAMES
+                .iter()
+                .any(|name| object.contains_key(*name))
+        });
+        let real = object.is_some_and(|object| {
+            crate::utility::http_error::object_has_non_null_named_field(
+                object,
+                &DOMAIN_SEARCH_V2_FIELD_NAMES,
+            )
+        });
+        let message = object.is_some_and(crate::utility::http_error::object_has_message_key);
+        // `{"domain":null}` is a result. A message beside only null fields is not.
+        if !named || (message && !real) {
             return Err(ZBError::api(status, UNEXPECTED_JSON_SHAPE_MESSAGE));
         }
         let domain_search_response =

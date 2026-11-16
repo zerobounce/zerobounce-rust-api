@@ -22,6 +22,7 @@ fn is_invisible_char(c: char) -> bool {
         '\u{00AD}'
             | '\u{034F}'
             | '\u{0600}'..='\u{0605}'
+            | '\u{0890}'..='\u{0891}'
             | '\u{061C}'
             | '\u{06DD}'
             | '\u{070F}'
@@ -369,6 +370,22 @@ fn json_unescaped(text: &str) -> String {
             continue;
         }
         if chars[i + 1] == 'u' || chars[i + 1] == 'U' {
+            // Rust, JavaScript, Swift and Ruby write a short escape as `\u{27}`.
+            if chars.get(i + 2) == Some(&'{') {
+                if let Some(end) = chars[i + 3..].iter().position(|c| *c == '}') {
+                    let digits: String = chars[i + 3..i + 3 + end].iter().collect();
+                    if !digits.is_empty()
+                        && digits.chars().all(|c| c.is_ascii_hexdigit())
+                        && digits.len() <= 6
+                    {
+                        if let Ok(code) = u32::from_str_radix(&digits, 16) {
+                            out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
+                            i += 4 + end;
+                            continue;
+                        }
+                    }
+                }
+            }
             if let Some(code) = hex4(&chars, i + 2) {
                 // A surrogate pair (\ud83d\ude00) is one character.
                 if (0xD800..0xDC00).contains(&code)
@@ -398,8 +415,34 @@ fn json_unescaped(text: &str) -> String {
 /// (`&#39;`, `&quot;`, `&APOS;`) and a quote doubled the way SQL writes it.
 /// A secret that holds a quote comes back in these forms, and none of them is
 /// a spelling [`secret_forms`] generates.
+/// `\047` (C, Perl, PostgreSQL). Exactly three octal digits, so a lone `\0` is left alone.
+fn octal_escapes_decoded(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            let mut value = 0u32;
+            let mut n = 0;
+            while n < 3 && i + 1 + n < chars.len() && chars[i + 1 + n].is_digit(8) {
+                value = value * 8 + chars[i + 1 + n].to_digit(8).unwrap_or(0);
+                n += 1;
+            }
+            if n == 3 && value <= 0xFF {
+                out.push(char::from_u32(value).unwrap_or('\u{FFFD}'));
+                i += 1 + n;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 fn quote_decoded(text: &str) -> String {
     let text = text.replace("\\'", "'");
+    let text = octal_escapes_decoded(&text);
     let text = hex_byte_escapes_decoded(&text);
     let text = html_unescaped(&text);
     text.replace("''", "'").replace("\"\"", "\"")
@@ -827,6 +870,7 @@ mod case_and_quote_tests {
         refused.extend([
             '\u{200B}', '\u{FEFF}', '\u{180E}', '\u{034F}', '\u{3164}', '\u{2800}', '\u{2065}', '\u{FFF0}',
             '\u{FFF8}', '\u{E0000}', '\u{E0001}', '\u{E0FFF}', '\u{115F}', '\u{FFA0}', '\u{2060}',
+            '\u{202E}', '\u{2066}', '\u{0600}', '\u{00AD}', '\u{FFF9}', '\u{1D173}', '\u{0890}', '\u{0891}',
         ]);
         refused.extend('\u{180B}'..='\u{180F}');
         refused.extend('\u{FE00}'..='\u{FE0F}');

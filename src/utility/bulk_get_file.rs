@@ -111,6 +111,8 @@ mod tests {
     #[test]
     fn leading_boms_do_not_hide_json() {
         assert!(get_file_json_indicates_error("\u{FEFF}{\"file_id\":\"x\"}"));
+        assert!(get_file_json_indicates_error("\u{00A0}{\"file_id\":\"x\"}"));
+        assert!(get_file_json_indicates_error("\u{00A0}\u{FEFF}{not json"));
         assert!(get_file_json_indicates_error("\u{FEFF}\u{FEFF}{not json"));
         assert!(get_file_json_indicates_error("\u{FEFF} \u{FEFF}[1]"));
         assert!(!get_file_json_indicates_error("\u{FEFF}email,status\n"));

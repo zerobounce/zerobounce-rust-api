@@ -148,12 +148,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag }}
+          EXPECTED_SHA: ${{ needs.validate-tag.outputs.tag_sha }}
         run: |
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "Error: the validated tag commit is missing."
+            exit 1
+          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists, skipping."
           else
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --target "$EXPECTED_SHA" \
               --title "$TAG" \
               --generate-notes
           fi

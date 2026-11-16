@@ -167,20 +167,6 @@ pub struct FindEmailResponseV2 {
 /// Response structure for the new domain_search_v2 API endpoint.
 /// This structure matches the domain search API response format which includes
 /// `format`, `confidence`, and `other_domain_formats` fields.
-/// The JSON names of [`DomainSearchResponseV2`]'s fields. Every field defaults,
-/// because the live API leaves out the ones that do not apply, so serde accepts
-/// any object; a body that carries none of these names is not a domain search
-/// answer.
-pub(crate) const DOMAIN_SEARCH_V2_FIELD_NAMES: [&str; 7] = [
-    "domain",
-    "company_name",
-    "format",
-    "confidence",
-    "did_you_mean",
-    "failure_reason",
-    "other_domain_formats",
-];
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct DomainSearchResponseV2 {
     #[serde(default, deserialize_with = "null_as_default")]
@@ -198,6 +184,18 @@ pub struct DomainSearchResponseV2 {
     #[serde(default, deserialize_with = "null_as_default")]
     pub other_domain_formats: Vec<DomainFormats>,
 }
+
+/// JSON names of [`DomainSearchResponseV2`]'s fields. A body with none of them
+/// is not a domain search answer.
+pub(crate) const DOMAIN_SEARCH_V2_FIELD_NAMES: [&str; 7] = [
+    "domain",
+    "company_name",
+    "format",
+    "confidence",
+    "did_you_mean",
+    "failure_reason",
+    "other_domain_formats",
+];
 
 
 #[cfg(test)]

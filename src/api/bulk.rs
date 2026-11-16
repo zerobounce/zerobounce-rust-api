@@ -32,17 +32,20 @@ impl ZeroBounce {
         let url = crate::parse_request_url(&self.url_provider.bulk_url_of(endpoint))?;
         let response = self.client.post(url).multipart(multi_part_form).send()?;
 
-        let response_content = self.read_api_response(response)?;
-        crate::utility::http_error::parse_json_body(&response_content)
+        let (status, response_content) = self.read_api_response_with_status(response, false)?;
+        crate::utility::http_error::parse_json_body_with_status(status, &response_content)
     }
 
     fn generic_file_status_check(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileStatus> {
         let query_args = HashMap::from([("file_id", file_id)]);
 
-        let response_content =
-            self.generic_get_request(self.url_provider.bulk_url_of(endpoint), query_args)?;
+        let (status, response_content) = self.get_request_with_status(
+            self.url_provider.bulk_url_of(endpoint),
+            query_args,
+            false,
+        )?;
 
-        crate::utility::http_error::parse_json_body(&response_content)
+        crate::utility::http_error::parse_json_body_with_status(status, &response_content)
     }
 
     /// Bulk `getfile` against a full URL.
@@ -203,9 +206,9 @@ impl ZeroBounce {
     pub(crate) fn result_delete_at(&self, url: String, file_id: &str) -> ZBResult<ZBFileFeedback> {
         let query_args = HashMap::from([("file_id", file_id)]);
 
-        let response_content = self.generic_get_request(url, query_args)?;
+        let (status, response_content) = self.get_request_with_status(url, query_args, false)?;
 
-        crate::utility::http_error::parse_json_body(&response_content)
+        crate::utility::http_error::parse_json_body_with_status(status, &response_content)
     }
 
     fn generic_result_delete(&self, endpoint: &str, file_id: &str) -> ZBResult<ZBFileFeedback> {

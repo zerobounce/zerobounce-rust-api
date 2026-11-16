@@ -2,8 +2,6 @@ pub mod api;
 pub mod utility;
 pub mod warmup;
 
-use std::collections::HashMap;
-
 pub use crate::api::{DomainSearchV2Builder, FindEmailV2Builder};
 pub use crate::utility::structures::bulk::{
     zb_download_type, ZBBulkResponse, ZBEmailFinderFileOptions, ZBFile, ZBFileFeedback,
@@ -155,8 +153,7 @@ impl ZeroBounce {
         T: Into<String>,
     {
         let base_url_string = base_url.into();
-        parse_request_url(&base_url_string)
-            .map_err(|_| ZBError::explicit("base_url must be an https:// URL"))?;
+        parse_request_url(&base_url_string)?;
         Self::build(api_key, base_url_string)
     }
 
@@ -189,25 +186,6 @@ impl ZeroBounce {
         error.redacted(&[self.api_key.as_str()])
     }
 
-    fn read_api_response(&self, response: reqwest::blocking::Response) -> ZBResult<String> {
-        self.read_api_response_checked(response, false)
-    }
-
-    fn read_api_response_checked(
-        &self,
-        response: reqwest::blocking::Response,
-        message_only_is_failure: bool,
-    ) -> ZBResult<String> {
-        let (status, content_type, response_content) = Self::read_api_body(response)?;
-        utility::http_error::ensure_json_api_body(status, &content_type, &response_content)
-            .map_err(|error| self.redact_error(error))?;
-        if message_only_is_failure {
-            utility::http_error::reject_message_only_body(status, &content_type, &response_content)
-                .map_err(|error| self.redact_error(error))?;
-        }
-        Ok(response_content)
-    }
-
     /// The status, content type and body of a response, the body read up to
     /// the JSON size cap. Checking it is the caller's job.
     fn read_api_body(response: reqwest::blocking::Response) -> ZBResult<(u16, String, String)> {
@@ -225,31 +203,6 @@ impl ZeroBounce {
             "response body exceeds size limit",
         )?;
         Ok((status, content_type, String::from_utf8_lossy(&body).into_owned()))
-    }
-
-    fn generic_get_request<'a>(
-        &'a self,
-        url: String,
-        query_args: HashMap<&'a str, &'a str>,
-    ) -> ZBResult<String> {
-        self.get_request_checked(url, query_args, false)
-    }
-
-    fn get_request_checked<'a>(
-        &'a self,
-        url: String,
-        mut query_args: HashMap<&'a str, &'a str>,
-        message_only_is_failure: bool,
-    ) -> ZBResult<String> {
-        self.require_key()?;
-        query_args.insert("api_key", self.api_key.as_str());
-
-        let response = self
-            .client
-            .get(parse_request_url(&url)?)
-            .query(&query_args)
-            .send()?;
-        self.read_api_response_checked(response, message_only_is_failure)
     }
 }
 
@@ -345,14 +298,15 @@ mod security_tests {
 
     #[test]
     fn rejects_loopback_userinfo_trick() {
-        assert!(rejected("http://127.0.0.1@evil.example/v2/").contains("https://"));
+        assert!(rejected("http://127.0.0.1@evil.example/v2/").contains("username or password"));
     }
 
     #[test]
     fn rejects_other_loopback_spellings_and_garbage() {
-        for url in ["http://127.0.0.2/v2/", "http://0.0.0.0/v2/", "ftp://127.0.0.1/", "not a url"] {
+        for url in ["http://127.0.0.2/v2/", "http://0.0.0.0/v2/", "ftp://127.0.0.1/"] {
             assert!(rejected(url).contains("https://"), "{url}");
         }
+        assert_eq!(rejected("not a url"), "request URL is not a valid URL");
     }
 
     #[test]

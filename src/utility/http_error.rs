@@ -273,9 +273,45 @@ pub fn reject_message_only_body(status: u16, content_type: &str, body: &str) -> 
 /// object (an array, `0`, `"x"`, `null`), an empty object, or a message-only
 /// object is an [`ZBError::ApiError`] with the response status. Any other
 /// object, which is a real status, passes.
+/// A file-status object has one of these names. Anything else (`{"foo":1}`,
+/// `{"message":"m","file_id":null}`) is not a status, even though it is an object.
+const FILE_STATUS_FIELDS: [&str; 9] = [
+    "success",
+    "file_id",
+    "file_name",
+    "file_status",
+    "error_reason",
+    "file_phase_2_status",
+    "return_url",
+    "upload_date",
+    "complete_percentage",
+];
+
+pub(crate) fn object_has_message_key(object: &serde_json::Map<String, serde_json::Value>) -> bool {
+    object
+        .keys()
+        .any(|key| MESSAGE_KEYS.contains(&key.as_str()))
+}
+
+pub(crate) fn object_has_non_null_named_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    names: &[&str],
+) -> bool {
+    names
+        .iter()
+        .any(|name| matches!(object.get(*name), Some(value) if !value.is_null()))
+}
+
 pub fn require_status_object_body(status: u16, content_type: &str, body: &str) -> ZBResult<()> {
     match serde_json::from_str::<serde_json::Value>(body.trim()) {
-        Ok(serde_json::Value::Object(_)) => reject_message_only_body(status, content_type, body),
+        Ok(serde_json::Value::Object(object)) => {
+            reject_message_only_body(status, content_type, body)?;
+            if object_has_non_null_named_field(&object, &FILE_STATUS_FIELDS) {
+                Ok(())
+            } else {
+                Err(ZBError::api(status, UNEXPECTED_JSON_SHAPE_MESSAGE))
+            }
+        }
         _ => Err(ZBError::api(status, UNEXPECTED_JSON_SHAPE_MESSAGE)),
     }
 }

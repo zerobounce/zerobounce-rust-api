@@ -8,9 +8,10 @@
 
 use zero_bounce::utility::http_error::UNEXPECTED_JSON_SHAPE_MESSAGE;
 use zero_bounce::utility::{
-    CONTENT_TYPE_JSON, ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_CREDITS,
-    ENDPOINT_EMAIL_FINDER, ENDPOINT_FILE_DELETE, ENDPOINT_FILE_STATUS, ENDPOINT_SCORING,
-    ENDPOINT_SCORING_DELETE, ENDPOINT_SCORING_STATUS, ENDPOINT_VALIDATE,
+    CONTENT_TYPE_JSON, ENDPOINT_ACTIVITY_DATA, ENDPOINT_API_USAGE, ENDPOINT_BATCH_VALIDATE,
+    ENDPOINT_CREDITS, ENDPOINT_EMAIL_FINDER, ENDPOINT_FILE_DELETE, ENDPOINT_FILE_SEND,
+    ENDPOINT_FILE_STATUS, ENDPOINT_SCORING, ENDPOINT_SCORING_DELETE, ENDPOINT_SCORING_STATUS,
+    ENDPOINT_VALIDATE,
 };
 use zero_bounce::utility::ZBError;
 
@@ -129,6 +130,8 @@ fn an_empty_or_message_only_file_status_is_an_api_error_with_the_response_status
     let bodies = [
         "{}", "{ }", "{\n}", "{\t}",
         r#"{"message":"m"}"#, r#"{"Message":null}"#, r#"{"error":""}"#,
+        r#"{"message":"m","file_id":null}"#, r#"{"MESSAGE":"Invalid API key"}"#,
+        r#"{"foo":1}"#, r#"{"":""}"#,
         "[]", r#"[{"file_status":"Complete"}]"#, "0", r#""x""#, "null", "true",
     ];
     let mut failures = Vec::new();
@@ -175,6 +178,7 @@ fn an_empty_or_unrelated_domain_search_v2_object_is_an_api_error_with_the_respon
     let bodies = [
         "{}", "{ }", "{\n}", "{\t}",
         r#"{"message":"m","file_id":null}"#,
+        r#"{"message":"Invalid domain","domain":null}"#,
         r#"{"file_id":"x"}"#,
         r#"{"success":true}"#,
     ];
@@ -231,6 +235,14 @@ fn a_wrong_shape_answer_carries_the_response_status() {
             zb.find_email_v2().first_name("J").domain("example.com").call().map(|_| ())
         }),
         ("GET", "/listS3files", r#"{"name":"x"}"#, |zb| zb.list_s3_files(None, None).map(|_| ())),
+        ("POST", ENDPOINT_BATCH_VALIDATE, "[1]", |zb| {
+            zb.batch_validate(vec![("a@b.com".into(), String::new())]).map(|_| ())
+        }),
+        ("GET", ENDPOINT_FILE_STATUS, "[1]", |zb| zb.bulk_validation_file_status_check("f").map(|_| ())),
+        ("GET", ENDPOINT_FILE_DELETE, "0", |zb| zb.bulk_validation_result_delete("f").map(|_| ())),
+        ("POST", ENDPOINT_FILE_SEND, "[1]", |zb| {
+            zb.bulk_validation_file_submit(&zero_bounce::ZBFile::from_content(b"a@b.com\n".to_vec())).map(|_| ())
+        }),
     ];
     let mut failures = Vec::new();
     for (method, endpoint, body, call) in calls {
