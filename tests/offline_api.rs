@@ -699,7 +699,7 @@ fn version_constant_matches_package() {
         "https://api.zerobounce.net/v2/"
     );
     assert_eq!(BULK_URI, "https://bulkapi.zerobounce.net/v2");
-    assert_eq!(env!("CARGO_PKG_VERSION"), "4.0.1");
+    assert_eq!(env!("CARGO_PKG_VERSION"), "4.1.0");
 }
 
 #[test]
